@@ -1,4 +1,9 @@
-# World Pendulum Alliance Tides (unattended) Experiment
+# World Pendulum Alliance Tides Post-Processing Script
 
-Collection of Python scripts to run and analyse (post-process)
-data from the tides pendulum experiment.
+This is the post-processing Python script that analyses data returned
+from the (unattended) `tides.py` pendulum experiment run. It provides 
+a web interface in order to show collected data and plot the desired 
+graphics. 
+
+## Install procedure
+
