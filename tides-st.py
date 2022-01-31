@@ -618,7 +618,8 @@ def main():
         st.subheader("INDIVIDUAL PLOTS")
         st.info(":point_left: Please select the **desired date** \
                 and the **number of plots** (*n*) in the left menu")
-        st.success(":bulb: This will show only *n* last runs")
+        st.success(":bulb: This will show only *n* last runs from the \
+                   selected date choosen on the left menu")
         individual_plots(options, plot_date, nlast, raw_data)
 
     # daily plots
