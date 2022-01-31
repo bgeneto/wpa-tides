@@ -7,3 +7,23 @@ graphics.
 
 ## Install procedure
 
+```shell
+$ git clone -b streamlit https://github.com/bgeneto/wpa-tides.git
+$ cd wpa-tides
+$ docker build -t tides-streamlit:latest .
+```
+
+Check image creation with: 
+```shell
+$ docker images
+```
+
+Run the container with:
+```shell
+$ docker run -d -p 8501:8501 tides-streamlit:latest
+```
+
+Or use the docker compose with the provided `docker-compose.yml` file: 
+```shell
+$ docker compose up -d
+```
