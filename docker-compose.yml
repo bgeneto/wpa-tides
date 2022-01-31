@@ -5,13 +5,21 @@ services:
     image: tides-streamlit:latest
     container_name: tides-streamlit
     hostname: tides
+    restart: always
     ports:
       - 8501:8501
     volumes:
       - ./:/app
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    restart: always
+    labels:
+      - autoheal=true
+    healthcheck:
+      test: /app/healthcheck.py
+      interval: 60s
+      retries: 5
+      start_period: 10s
+      timeout: 10s
     deploy:
       restart_policy:
         condition: on-failure
