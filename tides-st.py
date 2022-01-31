@@ -14,6 +14,7 @@ History:  v1.0.0 Initial release
           v1.0.4 Added slider for changing CTE
           v1.0.5 Added script version in bottom of the page
           v1.0.6 Added num plots slider and copyright notice
+          v1.0.7 Use 'data' directory to save and download files
 Usage:
     $ streamlit run tides-st.py
 """
@@ -40,7 +41,7 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.0.6"
+__version__ = "1.0.7"
 __status__ = "Development"
 __date__ = "20220131"
 
@@ -321,15 +322,15 @@ def st_layout(title: str = "Streamlit App") -> None:
     #st.markdown(hide_menu_style, unsafe_allow_html=True)
 
 
-def download_archive(fn: str) -> bool:
+def download_archive(fn: str, output_dir: str) -> bool:
     display.wait("Downloading pendulum archive data...")
     import requests
     url = f"https://cloud.bgeneto.com.br:4433/s/kbiz4qzDdkFAygb/download?path=%2F&files={fn}"
-    target_path = fn
+    fpath = os.path.join(output_dir, fn)
     try:
         response = requests.get(url, stream=True)
         if response.status_code == 200:
-            with open(target_path, 'wb') as f:
+            with open(fpath, 'wb') as f:
                 f.write(response.raw.read())
         else:
             return False
@@ -339,12 +340,13 @@ def download_archive(fn: str) -> bool:
     return True
 
 
-def extract_archive(fn: str) -> bool:
+def extract_archive(fn: str, output_dir: str) -> bool:
     display.wait("Extracting archive data...")
     import tarfile
-    destination_dir = filename_only(fn)
+    fpath = os.path.join(output_dir, fn)
+    destination_dir = os.path.join(output_dir, filename_only(fn))
     try:
-        tar = tarfile.open(fn, "r:gz")
+        tar = tarfile.open(fpath, "r:gz")
         tar.extractall(destination_dir)
         tar.close()
     except:
@@ -390,13 +392,14 @@ def exp_avg_data(csvfn: str, avg_data: pd.DataFrame, compress: bool = False) -> 
     return csvfn+fext
 
 
-def archive_too_old(fn: str) -> bool:
+def archive_too_old(fn: str, output_dir: str) -> bool:
     """Check if file is old enough to be downloaded again"""
-    if not os.path.isfile(fn):
+    fpath = os.path.join(output_dir, fn)
+    if not os.path.isfile(fpath):
         return True
     import time
     min_delta = 15*60  # 15 minutes old file
-    ftime = os.path.getmtime(fn)
+    ftime = os.path.getmtime(fpath)
     now = time.time()
     if (now - ftime) > min_delta:
         return True
@@ -520,22 +523,31 @@ def main():
         display.fatal("Invalid pendulum selection!")
         stop()
 
+    # create output directory
+    output_dir = 'data'
+    if not os.path.isdir(output_dir):
+        try:
+            os.makedirs(output_dir)
+        except:
+            display.fatal("Cannot create output directory")
+            stop()
+
     # avoid multiple downloads from widget changes
-    if archive_too_old(archive):
+    if archive_too_old(archive, output_dir):
         # download compressed archive
-        if not download_archive(archive):
+        if not download_archive(archive, output_dir):
             display.fatal(
                 "Cannot download compressed archive from remote location!")
             st.warning("Try again by reloading this page (F5).")
             stop()
 
         # extract downloaded file
-        if not extract_archive(archive):
+        if not extract_archive(archive, output_dir):
             display.fatal("Error extracting the compressed archive!")
             stop()
 
     # directory containing all csv files
-    input_dir = filename_only(archive)
+    input_dir = os.path.join(output_dir, filename_only(archive))
     # check input_dir existence
     if not os.path.isdir(input_dir):
         display.fatal(f"Input directory '{input_dir}' not found!")
@@ -581,11 +593,12 @@ def main():
     display.print(
         "Click the button :arrow_down: below to download up-to-date **averaged** data file")
     # export all average data to CSV
-    csvfn = exp_avg_data(f"avg-{input_dir}", avg_data)
+    csvfn = exp_avg_data(f"{input_dir}-avg", avg_data)
 
     # create download button
     with open(csvfn) as f:
-        st.download_button('Download CSV', f, file_name=csvfn, mime='text/csv')
+        st.download_button('Download CSV', f,
+                           file_name=os.path.basename(csvfn), mime='text/csv')
 
     with st.expander("..:: SAMPLE DATA ::.."):
         # print some data (from last experiment run)
