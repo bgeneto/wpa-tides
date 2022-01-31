@@ -1,2 +1,4 @@
-# wpa-tides
-Scripts for the World Pendulum Alliance Tides Experiment
+# World Pendulum Alliance Tides (unattended) Experiment
+
+Collection of Python scripts to run and analyse (post-process)
+data from the tides pendulum experiment.
