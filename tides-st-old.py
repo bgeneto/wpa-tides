@@ -16,18 +16,14 @@ History:  v1.0.0 Initial release
           v1.0.6 Added num plots slider and copyright notice
           v1.0.7 Use 'data' directory to save and download files
           v1.0.8 Download files from password protected folder
-          v1.0.9 Save raw_data to pickle file to improve performance
 Usage:
     $ streamlit run tides-st.py
 """
 
 import base64
 import collections
-import dask.dataframe as dd
 import math
 import os
-import pickle
-from re import S
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -46,7 +42,7 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.0.9"
+__version__ = "1.0.8"
 __status__ = "Development"
 __date__ = "20220201"
 
@@ -57,7 +53,7 @@ def stop(code=0):
     sys.exit(code)
 
 
-def myavg(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFrame:
+def myavg(dfd: pd.DataFrame, percentile: float = 0.0) -> pd.DataFrame:
     """Compute the (trimmed) mean of a dictionary of DataFrames
 
     Args:
@@ -86,7 +82,7 @@ def myavg(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFrame
     return ndf.transpose().sort_index()
 
 
-def mystdev(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFrame:
+def mystdev(dfd: pd.DataFrame, percentile: float = 0.0) -> pd.DataFrame:
     """Compute the (trimmed) standard deviation of a dictionary of DataFrames
 
     Args:
@@ -128,30 +124,15 @@ def filename_only(fn):
     return os.path.splitext(os.path.basename(fn))[0]
 
 
-def check_missing_lines(raw_data: dict[str, pd.DataFrame], num_csv_files: int) -> None:
-    # min number of lines in csv files to be considered as valid
-    # interrupted run may occur
-    min_lines_csv = 10 if csv.lines/2 > 10 else csv.lines/2
-    for key, df in raw_data.items():
-        nlines = len(df)
-        if nlines < min_lines_csv:
-            display.warning(
-                f"Ignoring file {key}. Wrong number of lines.")
-            csv.missing_files.append.append(key)
-            del raw_data[key]
-
-    if len(raw_data) + len(csv.missing_files) == num_csv_files:
-        display.success(f"{num_csv_files} files successfully processed!")
-    else:
-        display.fatal(
-            "Not all csv files were read successfully.")
-        stop()
-
-
-def load_data(all_files: list) -> dict:
+def load_data(all_files) -> dict:
     """Read all CSV files
     We put all raw data from csv files into a dictionary of pandas DataFrame.
     """
+
+    # min number of lines in csv files to be considered as valid
+    # interrupted run may occur
+    min_lines_csv = 10 if csv.lines/2 > 10 else csv.lines/2
+
     # read all files
     raw_data = {}
     for f in all_files:
@@ -160,18 +141,37 @@ def load_data(all_files: list) -> dict:
                                            header=None, float_precision='round_trip')
         except:
             pass
+        # ignore files with less than half the expected lines
+        nlines = len(raw_data[f.stem])
+        if nlines < min_lines_csv:
+            csv.missing_files.append(str(f.stem))
+            del raw_data[f.stem]
 
     # sort by date/filename
-    ret = dict(sorted(raw_data.items()))
+    ret = collections.OrderedDict(sorted(raw_data.items()))
 
     return ret
 
 
-def check_missing_files(raw_data: dict[str, pd.DataFrame]) -> None:
+def check_missing_files(raw_data: dict, num_csv_files: int) -> None:
     """Check missing files
     We check if there are any missing csv files.
     In other words, check if we missed any pendulum runs.
     """
+    if len(raw_data) + len(csv.missing_files) == num_csv_files:
+        display.success(f"{num_csv_files} files successfully processed!")
+    else:
+        display.fatal(
+            "Not all csv files were read successfully.")
+        display.error(
+            "Please check correct filename/datetime format.")
+        stop()
+
+    # warn about too little lines in files
+    for mf in csv.missing_files:
+        display.warning(
+            f"Ignoring file {mf}. Wrong number of lines.")
+
     try:
         d1 = datetime.strptime(list(raw_data)[0], csv.date_format)
     except Exception as e:
@@ -225,7 +225,7 @@ class Pendulum:
     def __init__(self,
                  length: float = 0.0,
                  temperature: float = 0.0,
-                 cte: float = 14e-6) -> None:
+                 cte: float = 0.0) -> None:
         # measured pendulum length (including ball radius)
         self.length = length
         # temperature at measured length
@@ -261,17 +261,12 @@ class Output:
             self.emoji = ""
         if not heading:
             heading = self.heading
-        msg = str(heading + self.emoji + self.prefix + str(msg)).strip()
+        msg = str(heading + self.emoji + self.prefix + msg).strip()
         self.function(msg)
 
     def fatal(self, msg: str) -> None:
         self.emoji = " :red_circle: "
         self.prefix = " FATAL: "
-        self.msg(msg)
-
-    def debug(self, msg: str) -> None:
-        self.emoji = " :bug: "
-        self.prefix = " DEBUG: "
         self.msg(msg)
 
     def error(self, msg: str) -> None:
@@ -282,7 +277,7 @@ class Output:
     def warning(self, msg: str) -> None:
         self.emoji = " :warning: "
         self.prefix = " WARNING: "
-        heading = self.heading + "##"
+        heading = self.heading + "#"
         self.msg(msg, heading)
 
     def info(self, msg: str) -> None:
@@ -329,7 +324,6 @@ def st_layout(title: str = "Streamlit App") -> None:
 
 
 def download_archive(fn: str, output_dir: str) -> bool:
-    """Download file from Nextcloud"""
     display.wait("Downloading pendulum archive data...")
     import requests
     fpath = os.path.join(output_dir, fn)
@@ -415,21 +409,13 @@ def archive_too_old(fn: str, output_dir: str) -> bool:
     if not os.path.isfile(fpath):
         return True
     import time
-
-    # 20 minutes old to (downloaded archive) be considered old
-    min_delta = 20*60
-    # get file modification time
+    min_delta = 15*60  # 15 minutes old file
     ftime = os.path.getmtime(fpath)
-    # current time
     now = time.time()
     if (now - ftime) > min_delta:
         return True
 
     return False
-
-
-def cte_status():
-    st.session_state.cte_changed = True
 
 
 def initial_sidebar_config():
@@ -441,20 +427,16 @@ def initial_sidebar_config():
         "Please choose a pendulum:",
         ('UnB - Primary', 'UnB - Secondary'),
         index=0,
-        key="pendulum",
-        on_change=cte_status)
+        key="pendulum")
     # date selector
     sidebar.date_input("Choose a day to plot:", key="plot_date")
     # CTE slider
-    if 'cte_changed' not in st.session_state:
-        st.session_state.cte_changed = False
     sidebar.slider('Wire CTE ⨯ 10⁻⁶ (default = 14):',
                    1,
                    100,
-                   step=1,
                    value=14,
-                   key="cte",
-                   on_change=cte_status)
+                   step=1,
+                   key="cte")
     # number of individual plots slider
     sidebar.slider('How many individual plots?',
                    1,
@@ -554,27 +536,15 @@ def main():
 
     # create output directory
     output_dir = 'data'
-
-    # directory containing all csv files
-    input_dir = os.path.join(output_dir, filename_only(archive))
-
-    if not os.path.isdir(input_dir):
+    if not os.path.isdir(output_dir):
         try:
-            os.makedirs(input_dir)
+            os.makedirs(output_dir)
         except:
-            display.fatal("Cannot create output directory!")
+            display.fatal("Cannot create output directory")
             stop()
 
-    # list of all csv and cached files in input_dir
-    all_files = [f for f in Path(input_dir).glob('*.csv')]
-
-    cached_files = [f for f in Path(input_dir).glob('*.pickle')]
-
     # avoid multiple downloads from widget changes
-    raw_data = {}
-    avg_data = pd.DataFrame()
-    cache_miss = archive_too_old(archive, output_dir) or len(cached_files) < 1
-    if cache_miss:
+    if archive_too_old(archive, output_dir):
         # download compressed archive
         if not download_archive(archive, output_dir):
             display.fatal(
@@ -587,45 +557,38 @@ def main():
             display.fatal("Error extracting the compressed archive!")
             stop()
 
-        placeholder = st.empty()
-        placeholder.write(
-            "#### :stopwatch: Please wait while parsing csv files...")
+    # directory containing all csv files
+    input_dir = os.path.join(output_dir, filename_only(archive))
+    # check input_dir existence
+    if not os.path.isdir(input_dir):
+        display.fatal(f"Input directory '{input_dir}' not found!")
+        stop()
 
-        # load/read csv files
-        with st.spinner('Wait for it...'):
-            raw_data = load_data(all_files)
+    placeholder = st.empty()
+    placeholder.write(
+        "#### :stopwatch: Please wait while parsing csv files...")
 
-        placeholder.empty()
-    else:
-        # load cached raw_data (deserialize)
-        with open(input_dir+'/raw.pickle', 'rb') as handle:
-            raw_data = pickle.load(handle)
-        # load cached avg_data
-        with open(input_dir+'/avg.pickle', 'rb') as handle:
-            avg_data = pickle.load(handle)
+    # load csv files
+    all_files = [f for f in Path(input_dir).glob('*.csv')]
+    with st.spinner('Wait for it...'):
+        raw_data = load_data(all_files)
 
-    # check missing lines then missing csv files
-    check_missing_lines(raw_data, len(all_files))
-    check_missing_files(raw_data)
+    # empty messages
+    placeholder.empty()
 
-    # cte changed value, recompute
-    if st.session_state.cte_changed or cache_miss:
-        # thermal expansion correction
-        temperature_c = thermal_correction(raw_data)
-
-        # compute std dev and average data
-        avg_data = myavg(raw_data)
-        avg_data['temperature_c'] = temperature_c
-
-        # cache loaded data to disk (via pickle)
-        with open(input_dir+'/raw.pickle', 'wb') as handle:
-            pickle.dump(raw_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        with open(input_dir+'/avg.pickle', 'wb') as handle:
-            pickle.dump(avg_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    # check missing csv files
+    check_missing_files(raw_data, len(all_files))
 
     st.warning(
         "*Local timezone is UTC—3 but all timestamps are displayed in UTC.*")
+
+    # thermal expansion correction
+    temperature_c = thermal_correction(raw_data)
+
+    # compute std dev and average data
+    avg_data = myavg(raw_data)
+    avg_data['temperature_c'] = temperature_c
+    #std_data = mystdev(raw_data)
 
     # choose proper gravity correction based on available initial temperature
     gravity = 'gravity_c' if pdl.temperature == 0 else 'gravity_c2'
@@ -693,9 +656,6 @@ def main():
     end = timer()
     st.caption(
         f":copyright: 2022 bgeneto | Version: {__version__} | Execution time: {(end-start):.2f}")
-
-    # reset cte change status
-    st.session_state.cte_changed = False
 
 
 if __name__ == '__main__':
