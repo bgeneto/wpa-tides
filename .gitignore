@@ -1,6 +1,9 @@
-# Ignore data output directory 
+# Ignore data output directory
 data/*
 utils/*
+
+# Ignore backup files
+*.bkp
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
