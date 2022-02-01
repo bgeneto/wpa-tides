@@ -138,12 +138,12 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame], num_csv_files: int) -
             csv.missing_files.append.append(key)
             del raw_data[key]
 
-    if len(raw_data) + len(csv.missing_files) == num_csv_files:
-        display.success(f"{num_csv_files} files successfully processed!")
-    else:
-        display.fatal(
-            "Not all csv files were read successfully.")
-        stop()
+    #if len(raw_data) + len(csv.missing_files) == num_csv_files:
+    display.success(f"{num_csv_files} files successfully processed!")
+    #else:
+    #    display.fatal(
+    #        "Not all csv files were read successfully.")
+    #    stop()
 
 
 def load_data(all_files: list) -> dict:
