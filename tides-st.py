@@ -16,7 +16,8 @@ History:  v1.0.0 Initial release
           v1.0.6 Added num plots slider and copyright notice
           v1.0.7 Use 'data' directory to save and download files
           v1.0.8 Download files from password protected folder
-          v1.0.9 Save raw_data to pickle file to improve performance
+          v1.1.0 Save raw_data to pickle file to improve performance
+          v1.1.1 Correct counting number of csv files
 Usage:
     $ streamlit run tides-st.py
 """
@@ -44,7 +45,7 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.0.9"
+__version__ = "1.1.1"
 __status__ = "Development"
 __date__ = "20220201"
 
@@ -138,12 +139,12 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame], num_csv_files: int) -
             csv.missing_files.append.append(key)
             del raw_data[key]
 
-    #if len(raw_data) + len(csv.missing_files) == num_csv_files:
-    display.success(f"{num_csv_files} files successfully processed!")
-    #else:
-    #    display.fatal(
-    #        "Not all csv files were read successfully.")
-    #    stop()
+    if len(raw_data) + len(csv.missing_files) == num_csv_files:
+        display.success(f"{num_csv_files} files successfully processed!")
+    else:
+        display.fatal(
+            "Not all csv files were read successfully.")
+        stop()
 
 
 def load_data(all_files: list) -> dict:
@@ -563,10 +564,12 @@ def main():
             display.fatal("Cannot create output directory!")
             stop()
 
-    # list of all csv and cached files in input_dir
-    all_files = [f for f in Path(input_dir).glob('*.csv')]
-
+    # count cached files
     cached_files = [f for f in Path(input_dir).glob('*.pickle')]
+
+    # count current number of csv in input_dir
+    all_files = [f for f in Path(input_dir).glob('*.csv')]
+    num_csv_files = len(all_files)
 
     # avoid multiple downloads from widget changes
     raw_data = {}
@@ -584,6 +587,10 @@ def main():
         if not extract_archive(archive, output_dir):
             display.fatal("Error extracting the compressed archive!")
             stop()
+
+        # after extracting, we list of all csv in input_dir for reading
+        all_files = [f for f in Path(input_dir).glob('*.csv')]
+        num_csv_files = len(all_files)
 
         placeholder = st.empty()
         placeholder.write(
@@ -603,7 +610,7 @@ def main():
             avg_data = pickle.load(handle)
 
     # check missing lines then missing csv files
-    check_missing_lines(raw_data, len(all_files))
+    check_missing_lines(raw_data, num_csv_files)
     check_missing_files(raw_data)
 
     # cte changed value, recompute
