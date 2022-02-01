@@ -18,6 +18,7 @@ History:  v1.0.0 Initial release
           v1.0.8 Download files from password protected folder
           v1.1.0 Save raw_data to pickle file to improve performance
           v1.1.1 Correct counting number of csv files
+          v1.1.2 Added trendline to specific plots
 Usage:
     $ streamlit run tides-st.py
 """
@@ -45,7 +46,7 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 __status__ = "Development"
 __date__ = "20220201"
 
@@ -489,6 +490,11 @@ def historical_plots(options, avg_data):
 def individual_plots(options, plot_date, nlast, raw_data):
     nraw_data = {k: v for k, v in raw_data.items() if k.startswith(plot_date)}
     for col in options:
+        tl = None
+        mode = 'markers+lines'
+        if col in ['temperature', 'velocity']:
+            tl = 'ols'
+            mode = 'markers'
         for i in range(1, nlast+1):
             try:
                 key = list(nraw_data)[-1*i]
@@ -503,8 +509,9 @@ def individual_plots(options, plot_date, nlast, raw_data):
                                  y=sr.values,
                                  x=sr.index,
                                  title=f"{col.upper()} @ {key} [{lsr} pts | err: {err:.3e}]",
-                                 labels={"index": "oscillation", "y": sr.name})
-                fig.update_traces(mode='markers+lines')
+                                 labels={"index": "oscillation", "y": sr.name},
+                                 trendline=tl)
+                fig.data[0].update(mode=mode)
                 st.plotly_chart(fig, use_container_width=True)
 
 
