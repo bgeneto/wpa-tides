@@ -15,6 +15,7 @@ History:  v1.0.0 Initial release
           v1.0.5 Added script version in bottom of the page
           v1.0.6 Added num plots slider and copyright notice
           v1.0.7 Use 'data' directory to save and download files
+          v1.0.8 Download files from password protected folder
 Usage:
     $ streamlit run tides-st.py
 """
@@ -41,9 +42,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.0.7"
+__version__ = "1.0.8"
 __status__ = "Development"
-__date__ = "20220131"
+__date__ = "20220201"
 
 
 def stop(code=0):
@@ -325,10 +326,20 @@ def st_layout(title: str = "Streamlit App") -> None:
 def download_archive(fn: str, output_dir: str) -> bool:
     display.wait("Downloading pendulum archive data...")
     import requests
-    url = f"https://cloud.bgeneto.com.br:4433/s/kbiz4qzDdkFAygb/download?path=%2F&files={fn}"
     fpath = os.path.join(output_dir, fn)
+    share_id = 'kbiz4qzDdkFAygb'
+    share_passwd = 'ij0ndzX6'
+    auth = (share_id, share_passwd)
+    headers = {"X-Requested-With": "XMLHttpRequest"}
+    url = f"https://cloud.bgeneto.com.br:4433/public.php/webdav/{fn}"
+    if not share_passwd:
+        url = f"https://cloud.bgeneto.com.br:4433/s/{share_id}/download?path=%2F&files={fn}"
     try:
-        response = requests.get(url, stream=True)
+        if not share_passwd:
+            response = requests.get(url, stream=True)
+        else:
+            response = requests.get(
+                url, headers=headers, auth=auth, stream=True)
         if response.status_code == 200:
             with open(fpath, 'wb') as f:
                 f.write(response.raw.read())
