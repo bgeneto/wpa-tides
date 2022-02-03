@@ -35,9 +35,11 @@ from timeit import default_timer as timer
 from types import SimpleNamespace
 from typing import Callable
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 from scipy import stats
+from scipy.fft import ifft, fft, fftfreq
 
 import streamlit as st
 
@@ -188,7 +190,7 @@ def check_missing_files(raw_data: dict[str, pd.DataFrame]) -> None:
                 f"You have {n} missing data file(s) before {dtime}")
             for m in range(1, n+1):
                 mfile = (
-                    d2 - timedelta(minutes=23*m)
+                    d2 - timedelta(minutes=exp.dt*m)
                 ).strftime(csv.date_format)
                 csv.missing_files.append(mfile)
         # update date
@@ -534,6 +536,93 @@ def daily_plots(options, plot_date, avg_data):
             display.warning("No data available in the selected day!")
 
 
+def dft(x, dt):
+    """
+    Função para calcular a
+    Transformada de Fourier Discreta
+    de um sinal/função real 1D no
+    tempo e retorna uma função y no
+    domínio da frequência.
+    """
+
+    N = len(x)
+    n = np.arange(N)
+    k = n.reshape((N, 1))
+    e = np.exp(-2j * np.pi * k * n / N)
+    y = np.dot(e, x)
+
+    # freq scale
+    sr = 1./dt
+    T = N/sr
+    f = n/T
+
+    return f, y
+
+
+def fft_plot(signal, npts: int = 0):
+    '''s = np.array([0.00000000e+00,6.49951092e-01,1.24301000e+00,1.73098263e+00,
+    2.08154121e+00,2.28261600e+00,2.34327722e+00,2.29102039e+00,
+    2.16602580e+00,2.01350931e+00,1.87561275e+00,1.78433917e+00,
+    1.75681059e+00,1.79365925e+00,1.88074856e+00,1.99377423e+00,
+    2.10474409e+00,2.18898123e+00,2.23120727e+00,2.22945607e+00,
+    2.19600566e+00,2.15511222e+00,2.13796970e+00,2.17587843e+00,
+    2.29297677e+00,2.50000000e+00,2.79035655e+00,3.13938578e+00,
+    3.50706391e+00,3.84376807e+00,4.09811869e+00,4.22550953e+00,
+    4.19578177e+00,3.99863534e+00,3.64577057e+00,3.16934473e+00,
+    2.61699766e+00,2.04432572e+00,1.50614412e+00,1.04809007e+00,
+    7.00042246e-01,4.72482828e-01,3.56371693e-01,3.26445884e-01,
+    3.47223767e-01,3.80502964e-01,3.92885361e-01,3.61888418e-01,
+    2.79502648e-01,1.52571317e-01,3.06161700e-16,-1.52571317e-01,
+    -2.79502648e-01,-3.61888418e-01,-3.92885361e-01,-3.80502964e-01,
+    -3.47223767e-01,-3.26445884e-01,-3.56371693e-01,-4.72482828e-01,
+    -7.00042246e-01,-1.04809007e+00,-1.50614412e+00,-2.04432572e+00,
+    -2.61699766e+00,-3.16934473e+00,-3.64577057e+00,-3.99863534e+00,
+    -4.19578177e+00,-4.22550953e+00,-4.09811869e+00,-3.84376807e+00,
+    -3.50706391e+00,-3.13938578e+00,-2.79035655e+00,-2.50000000e+00,
+    -2.29297677e+00,-2.17587843e+00,-2.13796970e+00,-2.15511222e+00,
+    -2.19600566e+00,-2.22945607e+00,-2.23120727e+00,-2.18898123e+00,
+    -2.10474409e+00,-1.99377423e+00,-1.88074856e+00,-1.79365925e+00,
+    -1.75681059e+00,-1.78433917e+00,-1.87561275e+00,-2.01350931e+00,
+    -2.16602580e+00,-2.29102039e+00,-2.34327722e+00,-2.28261600e+00,
+    -2.08154121e+00,-1.73098263e+00,-1.24301000e+00,-6.49951092e-01])'''
+
+    col = signal.name
+    s = signal.to_numpy()
+    if npts:
+        s = s[0:npts]
+
+    #xf, yf = dft(s, dt=0.01) # our implemented method
+    yf = fft(s)
+    N = len(s)
+    # time scale in days
+    day = 24*60.0
+    dt = float(exp.dt)/day
+    t = np.arange(0, N*dt, dt)
+    xf = fftfreq(N, dt)
+
+    # take only freqs below Nyquist limit:
+    t2  = t[:N//2]
+    yf2 = yf[:N//2]
+    xf2 = xf[:N//2]
+
+    # compute the normalized amplitude
+    amp = np.abs(2.0/N*yf)
+    amp2 = np.abs(2.0/N*yf2)
+
+    # plot the results
+    fig = px.bar(x=xf2,
+                 y=amp2,
+                 labels={"x": "frequency", "y": "amplitude"},
+                 title=f"DFT of {col.upper()} (Positive only = below Nyquist freq)")
+    st.plotly_chart(fig, use_container_width=True)
+
+    fig = px.line(x=t,
+                  y=ifft(yf).real,
+                  labels={"x": "time (days)", "y": "amplitude"},
+                  title=f"{col.upper()} - Restored Signal from IFFT")
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def main():
     start = timer()
 
@@ -700,6 +789,9 @@ def main():
         st.subheader("DAILY PLOTS")
         st.info(":point_left: Please select the **desired date** in the left menu")
         daily_plots(options, plot_date, avg_data)
+
+    # fft plots
+    fft_plot(avg_data[gravity])
 
     # copyright, version and running time info
     end = timer()
