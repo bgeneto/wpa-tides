@@ -39,7 +39,8 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 from scipy import stats
-from scipy.fft import ifft, fft, fftfreq
+from scipy.fft import fft, fftfreq, ifft
+from scipy.signal import find_peaks
 
 import streamlit as st
 
@@ -617,6 +618,18 @@ def fft_plot(signal, npts: int = 0):
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
                  title=f"DFT of {col.upper()} (Positive only = below Nyquist freq)")
     #fig.update_xaxes(range=[0, 2])
+    st.plotly_chart(fig, use_container_width=True)
+
+    # try to find peaks
+    pos_mask = np.where(xf2 < 4)
+    freqs = xf2[pos_mask]
+    amps = amp2[pos_mask]
+    peaks, _ = find_peaks(amps, height=0)
+
+    fig = px.bar(x=xf2[peaks],
+                y=amp2[peaks],
+                labels={"x": "frequency (1/day)", "y": "amplitude"},
+                title=f"DFT Peaks zoom (freq < 4)")
     st.plotly_chart(fig, use_container_width=True)
 
     fig = px.line(x=t,
