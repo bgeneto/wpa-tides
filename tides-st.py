@@ -587,16 +587,18 @@ def fft_plot(signal, npts: int = 0):
     -2.08154121e+00,-1.73098263e+00,-1.24301000e+00,-6.49951092e-01])'''
 
     col = signal.name
-    s = signal.to_numpy()
+    avg = signal.mean()
+    s = (signal-avg).to_numpy()
     if npts:
         s = s[0:npts]
 
-    #xf, yf = dft(s, dt=0.01) # our implemented method
+    # xf, yf = dft(s, dt=0.01) # our implemented method
+    # using scipy fft: it is faster
     yf = fft(s)
     N = len(s)
     # time scale in days
-    day = 24*60.0
-    dt = float(exp.dt)/day
+    day = 24*60.0 # min
+    dt = float(exp.dt)/day # dt in unit of days
     t = np.arange(0, N*dt, dt)
     xf = fftfreq(N, dt)
 
@@ -612,8 +614,9 @@ def fft_plot(signal, npts: int = 0):
     # plot the results
     fig = px.bar(x=xf2,
                  y=amp2,
-                 labels={"x": "frequency", "y": "amplitude"},
+                 labels={"x": "frequency (1/day)", "y": "amplitude"},
                  title=f"DFT of {col.upper()} (Positive only = below Nyquist freq)")
+    #fig.update_xaxes(range=[0, 2])
     st.plotly_chart(fig, use_container_width=True)
 
     fig = px.line(x=t,
