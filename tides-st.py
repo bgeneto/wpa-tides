@@ -21,6 +21,7 @@ History:  v1.0.0 Initial release
           v1.1.2 Added trendline to specific plots
           v1.1.3 Using real fft version from scipy
           v1.1.4 Added slider for points in FFT
+          v1.1.5 Added more historical plots
 Usage:
     $ streamlit run tides-st.py
 """
@@ -40,6 +41,8 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from scipy import stats
 
 import streamlit as st
@@ -49,7 +52,7 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.1.4"
+__version__ = "1.1.5"
 __status__ = "Development"
 __date__ = "20220207"
 
@@ -131,7 +134,9 @@ def filename_only(fn):
     return os.path.splitext(os.path.basename(fn))[0]
 
 
-def check_missing_lines(raw_data: dict[str, pd.DataFrame], num_csv_files: int) -> None:
+def check_missing_lines(raw_data: dict[str, pd.DataFrame],
+                        num_csv_files: int,
+                        archive) -> None:
     # min number of lines in csv files to be considered as valid
     # interrupted run may occur
     min_lines_csv = 10 if csv.lines/2 > 10 else csv.lines/2
@@ -144,10 +149,15 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame], num_csv_files: int) -
             del raw_data[key]
 
     if len(raw_data) + len(csv.missing_files) == num_csv_files:
-        display.success(f"{num_csv_files} files successfully processed!")
+        st.success(
+            f":white_check_mark: {num_csv_files} files successfully processed!")
     else:
-        display.fatal(
-            "Not all csv files were read successfully.")
+        try:
+            os.remove(archive)
+        except:
+            pass
+        st.error(
+            ":x: Not all csv files were read successfully. Please refresh (F5) this page!")
         stop()
 
 
@@ -182,13 +192,13 @@ def check_missing_files(raw_data: dict[str, pd.DataFrame]) -> None:
             "Wrong date format! Please check provided csv date format.")
         stop()
 
+    wstr = ''
     for dtime in raw_data:
         d2 = datetime.strptime(dtime, csv.date_format)
         dt = (d2 - d1).total_seconds()/60.0
         n = math.floor(dt/exp.dt) - 1
         if dt > exp.dt and n > 0:
-            display.warning(
-                f"You have {n} missing data file(s) before {dtime}")
+            wstr += f":warning: You have **{n} missing** data file(s) before **{dtime}**  \n"
             for m in range(1, n+1):
                 mfile = (
                     d2 - timedelta(minutes=exp.dt*m)
@@ -196,6 +206,8 @@ def check_missing_files(raw_data: dict[str, pd.DataFrame]) -> None:
                 csv.missing_files.append(mfile)
         # update date
         d1 = d2
+
+    st.warning(wstr)
 
 
 def thermal_correction(raw_data: dict[str, pd.DataFrame]) -> pd.Series:
@@ -442,7 +454,7 @@ def initial_sidebar_config():
     # pendulum radio box
     sidebar.radio(
         "Please choose a pendulum:",
-        ('UnB - Primary', 'UnB - Secondary'),
+        ('UnB Primary', 'UnB Secondary'),
         index=0,
         key="pendulum",
         on_change=cte_status)
@@ -470,8 +482,68 @@ def initial_sidebar_config():
 
 
 def historical_plots(options, avg_data):
-    # plot gravity comparison
+    # plot without indexes
     df = avg_data.reset_index(drop=True)
+
+    # period vs temperature
+    # create figure with secondary y-axis
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    # Add traces
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['period'], name="period"),
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['temperature'], name="temperature"),
+        secondary_y=True,
+    )
+    fig.update_layout(
+        title_text="PERIOD VS TEMPERATURE (averaged - historical)"
+    )
+    # Set y-axes titles
+    fig.update_yaxes(title_text="period (s)", secondary_y=False)
+    fig.update_yaxes(title_text="temperature (°C)", secondary_y=True)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # period vs corrected gravity
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    # Add traces
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['period'], name="period"),
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['gravity_c2'], name="gravity_c2"),
+        secondary_y=True,
+    )
+    fig.update_layout(
+        title_text="PERIOD VS GRAVITY (averaged - historical)"
+    )
+    # Set y-axes titles
+    fig.update_yaxes(title_text="period (s)", secondary_y=False)
+    fig.update_yaxes(title_text="gravity_c2 (m/s²)", secondary_y=True)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # temperature vs corrected gravity
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    # Add traces
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['temperature'], name="temperature"),
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['gravity_c2'], name="gravity_c2"),
+        secondary_y=True,
+    )
+    fig.update_layout(
+        title_text="TEMPERATURE VS GRAVITY (averaged - historical)"
+    )
+    # Set y-axes titles
+    fig.update_yaxes(title_text="temperature (°C)", secondary_y=False)
+    fig.update_yaxes(title_text="gravity_c2 (m/s²)", secondary_y=True)
+    st.plotly_chart(fig, use_container_width=True)
+
+    # plot gravity comparison
     fig = px.line(df,
                   y=['gravity', 'gravity_c', 'gravity_c2'],
                   x=df.index,
@@ -480,6 +552,7 @@ def historical_plots(options, avg_data):
     # fig.update_traces(mode='markers+lines')
     st.plotly_chart(fig, use_container_width=True)
 
+    # plot selected data
     for col in options:
         sr = avg_data[col].reset_index(drop=True)
         fig = px.scatter(sr,
@@ -537,7 +610,7 @@ def daily_plots(options, plot_date, avg_data):
             display.warning("No data available in the selected day!")
 
 
-def fft_plot(signal, npts: int = 0):
+def fft_plots(signal, npts: int = 0):
     from scipy.fft import rfft, rfftfreq
     from scipy.signal import find_peaks
 
@@ -583,7 +656,35 @@ def fft_plot(signal, npts: int = 0):
     fig = px.bar(x=freqs[peaks],
                  y=amps[peaks],
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
-                 title=f"DFT Peaks (for period < 4 days)")
+                 title=f"DFT Peaks ({npts} points used)")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def extra_plots(df):
+    # FIG 01
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    # Add traces
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['temperature'], name="temperature"),
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['gravity_c2'], name="gravity_c2"),
+        secondary_y=True,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # FIG 02
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    # Add traces
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['length_c'], name="length_c"),
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['gravity_c2'], name="gravity_c2"),
+        secondary_y=True,
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -598,11 +699,11 @@ def main():
     # pendulum data according to the location
     archive = None
     p = st.session_state.pendulum
-    if p == 'UnB - Primary':
+    if p == 'UnB Primary':
         archive = 'tides-data-WP-BSB.tgz'
         pdl.length = 2.8676
         pdl.temperature = 0.0
-    elif p == 'UnB - Secondary':
+    elif p == 'UnB Secondary':
         pdl.length = 2.62135
         pdl.temperature = 22.6260
         archive = 'tides-data-wpafup.tgz'
@@ -610,6 +711,8 @@ def main():
     if not archive:
         display.fatal("Invalid pendulum selection!")
         stop()
+
+    st.subheader(f"Showing :ocean: data from: **{p} Pendulum**")
 
     # create output directory
     output_dir = 'data'
@@ -670,7 +773,8 @@ def main():
             avg_data = pickle.load(handle)
 
     # check missing lines then missing csv files
-    check_missing_lines(raw_data, num_csv_files)
+    check_missing_lines(raw_data, num_csv_files,
+                        os.path.join(output_dir, archive))
     check_missing_files(raw_data)
 
     # cte changed value, recompute
@@ -689,8 +793,8 @@ def main():
         with open(input_dir+'/avg.pickle', 'wb') as handle:
             pickle.dump(avg_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-    st.warning(
-        "*Local timezone is UTC—3 but all timestamps are displayed in UTC.*")
+    st.info(
+        ":bulb: *Local timezone is UTC–3 but all timestamps are displayed in UTC.*")
 
     # choose proper gravity correction based on available initial temperature
     gravity = 'gravity_c' if pdl.temperature == 0 else 'gravity_c2'
@@ -711,9 +815,9 @@ def main():
                             step=mpts,
                             key="fftpts")
 
-    st.info("#### :point_down: Aggregated data available to download")
+    st.success(":point_down: Aggregated data available to download below")
     display.print(
-        "Click the button :arrow_down: below to download up-to-date **averaged** data file")
+        "Click the button below :arrow_down: to download up-to-date **averaged** data file")
     # export all average data to CSV
     csvfn = exp_avg_data(f"{input_dir}-avg", avg_data)
 
@@ -764,7 +868,9 @@ def main():
         daily_plots(options, plot_date, avg_data)
 
     # fft plot in fftpts from slider
-    fft_plot(avg_data[gravity], fftpts)
+    fft_plots(avg_data[gravity], fftpts)
+
+    # extra_plots(avg_data)
 
     # copyright, version and running time info
     end = timer()
@@ -780,7 +886,7 @@ if __name__ == '__main__':
     force_streamlit = False
 
     # page title/header
-    title = "UnB WPA Tides Experiment - Realtime Data Visualization"
+    title = "WPA Tides Experiment - Realtime Data Visualization"
 
     # pendulum data
     pdl = Pendulum()
