@@ -540,11 +540,11 @@ def fft_plot(signal, npts: int = 0):
     from scipy.fft import rfft, rfftfreq, irfft
     from scipy.signal import find_peaks
 
+    npts = len(signal) if npts == 0 else npts
     col = signal.name
     avg = signal.mean()
     s = (signal-avg).to_numpy()
-    if npts:
-        s = s[0:npts]
+    s = s[0:npts]
 
     # using scipy fft: it is faster
     yf = rfft(s)
@@ -753,7 +753,8 @@ def main():
         daily_plots(options, plot_date, avg_data)
 
     # fft plots
-    fft_plot(avg_data[gravity])
+    fftpts = (62+63)*(len(avg_data[gravity])//(62+63))
+    fft_plot(avg_data[gravity],fftpts)
 
     # copyright, version and running time info
     end = timer()
