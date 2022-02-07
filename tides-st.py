@@ -19,6 +19,7 @@ History:  v1.0.0 Initial release
           v1.1.0 Save raw_data to pickle file to improve performance
           v1.1.1 Correct counting number of csv files
           v1.1.2 Added trendline to specific plots
+          v1.1.3 Using real fft version from scipy
 Usage:
     $ streamlit run tides-st.py
 """
@@ -39,8 +40,6 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 from scipy import stats
-from scipy.fft import fft, fftfreq, ifft
-from scipy.signal import find_peaks
 
 import streamlit as st
 
@@ -49,9 +48,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.1.2"
+__version__ = "1.1.3"
 __status__ = "Development"
-__date__ = "20220201"
+__date__ = "20220207"
 
 
 def stop(code=0):
@@ -537,55 +536,9 @@ def daily_plots(options, plot_date, avg_data):
             display.warning("No data available in the selected day!")
 
 
-def dft(x, dt):
-    """
-    Função para calcular a
-    Transformada de Fourier Discreta
-    de um sinal/função real 1D no
-    tempo e retorna uma função y no
-    domínio da frequência.
-    """
-
-    N = len(x)
-    n = np.arange(N)
-    k = n.reshape((N, 1))
-    e = np.exp(-2j * np.pi * k * n / N)
-    y = np.dot(e, x)
-
-    # freq scale
-    sr = 1./dt
-    T = N/sr
-    f = n/T
-
-    return f, y
-
-
 def fft_plot(signal, npts: int = 0):
-    '''s = np.array([0.00000000e+00,6.49951092e-01,1.24301000e+00,1.73098263e+00,
-    2.08154121e+00,2.28261600e+00,2.34327722e+00,2.29102039e+00,
-    2.16602580e+00,2.01350931e+00,1.87561275e+00,1.78433917e+00,
-    1.75681059e+00,1.79365925e+00,1.88074856e+00,1.99377423e+00,
-    2.10474409e+00,2.18898123e+00,2.23120727e+00,2.22945607e+00,
-    2.19600566e+00,2.15511222e+00,2.13796970e+00,2.17587843e+00,
-    2.29297677e+00,2.50000000e+00,2.79035655e+00,3.13938578e+00,
-    3.50706391e+00,3.84376807e+00,4.09811869e+00,4.22550953e+00,
-    4.19578177e+00,3.99863534e+00,3.64577057e+00,3.16934473e+00,
-    2.61699766e+00,2.04432572e+00,1.50614412e+00,1.04809007e+00,
-    7.00042246e-01,4.72482828e-01,3.56371693e-01,3.26445884e-01,
-    3.47223767e-01,3.80502964e-01,3.92885361e-01,3.61888418e-01,
-    2.79502648e-01,1.52571317e-01,3.06161700e-16,-1.52571317e-01,
-    -2.79502648e-01,-3.61888418e-01,-3.92885361e-01,-3.80502964e-01,
-    -3.47223767e-01,-3.26445884e-01,-3.56371693e-01,-4.72482828e-01,
-    -7.00042246e-01,-1.04809007e+00,-1.50614412e+00,-2.04432572e+00,
-    -2.61699766e+00,-3.16934473e+00,-3.64577057e+00,-3.99863534e+00,
-    -4.19578177e+00,-4.22550953e+00,-4.09811869e+00,-3.84376807e+00,
-    -3.50706391e+00,-3.13938578e+00,-2.79035655e+00,-2.50000000e+00,
-    -2.29297677e+00,-2.17587843e+00,-2.13796970e+00,-2.15511222e+00,
-    -2.19600566e+00,-2.22945607e+00,-2.23120727e+00,-2.18898123e+00,
-    -2.10474409e+00,-1.99377423e+00,-1.88074856e+00,-1.79365925e+00,
-    -1.75681059e+00,-1.78433917e+00,-1.87561275e+00,-2.01350931e+00,
-    -2.16602580e+00,-2.29102039e+00,-2.34327722e+00,-2.28261600e+00,
-    -2.08154121e+00,-1.73098263e+00,-1.24301000e+00,-6.49951092e-01])'''
+    from scipy.fft import rfft, rfftfreq, irfft
+    from scipy.signal import find_peaks
 
     col = signal.name
     avg = signal.mean()
@@ -593,47 +546,40 @@ def fft_plot(signal, npts: int = 0):
     if npts:
         s = s[0:npts]
 
-    # xf, yf = dft(s, dt=0.01) # our implemented method
     # using scipy fft: it is faster
-    yf = fft(s)
+    yf = rfft(s)
     N = len(s)
     # time scale in days
-    day = 24*60.0 # min
-    dt = float(exp.dt)/day # dt in unit of days
-    t = np.arange(0, N*dt, dt)
-    xf = fftfreq(N, dt)
+    day = 24*60.0  # min
+    dt = float(exp.dt)/day  # dt in unit of days
+    t = np.linspace(0, N*dt, N, endpoint=False)
+    xf = rfftfreq(N, dt)
 
-    # take only freqs below Nyquist limit:
-    t2  = t[:N//2]
-    yf2 = yf[:N//2]
-    xf2 = xf[:N//2]
-
-    # compute the normalized amplitude
+    # normalized amplitude/power:
     amp = np.abs(2.0/N*yf)
-    amp2 = np.abs(2.0/N*yf2)
 
     # plot the results
-    fig = px.bar(x=xf2,
-                 y=amp2,
+    fig = px.bar(x=xf,
+                 y=amp,
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
-                 title=f"DFT of {col.upper()} (Positive only = below Nyquist freq)")
+                 title=f"DFT of {col.upper()} ({npts} total pts used)")
     #fig.update_xaxes(range=[0, 2])
     st.plotly_chart(fig, use_container_width=True)
 
     # try to find peaks
-    pos_mask = np.where(xf2 < 4)
-    freqs = xf2[pos_mask]
-    amps = amp2[pos_mask]
-    peaks, _ = find_peaks(amps, height=0)
+    pos_mask = np.where(xf < 4)
+    freqs = xf[pos_mask]
+    amps = amp[pos_mask]
+    peaks, _ = find_peaks(amps, height=1e-14)
 
-    fig = px.bar(x=xf2[peaks],
-                y=amp2[peaks],
-                labels={"x": "frequency (1/day)", "y": "amplitude"},
-                title=f"DFT Peaks zoom (freq < 4)")
+    fig = px.bar(x=xf[peaks],
+                 y=amp[peaks],
+                 labels={"x": "frequency (1/day)", "y": "amplitude"},
+                 title=f"DFT Peaks (for period < 4 days)")
     st.plotly_chart(fig, use_container_width=True)
 
     fig = px.line(x=t,
-                  y=ifft(yf).real,
+                  y=irfft(yf).real,
                   labels={"x": "time (days)", "y": "amplitude"},
                   title=f"{col.upper()} - Restored Signal from IFFT")
     st.plotly_chart(fig, use_container_width=True)
