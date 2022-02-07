@@ -20,6 +20,7 @@ History:  v1.0.0 Initial release
           v1.1.1 Correct counting number of csv files
           v1.1.2 Added trendline to specific plots
           v1.1.3 Using real fft version from scipy
+          v1.1.4 Added slider for points in FFT
 Usage:
     $ streamlit run tides-st.py
 """
@@ -48,7 +49,7 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.1.3"
+__version__ = "1.1.4"
 __status__ = "Development"
 __date__ = "20220207"
 
@@ -537,7 +538,7 @@ def daily_plots(options, plot_date, avg_data):
 
 
 def fft_plot(signal, npts: int = 0):
-    from scipy.fft import rfft, rfftfreq, irfft
+    from scipy.fft import rfft, rfftfreq
     from scipy.signal import find_peaks
 
     npts = len(signal) if npts == 0 else npts
@@ -558,30 +559,31 @@ def fft_plot(signal, npts: int = 0):
     # normalized amplitude/power:
     amp = np.abs(2.0/N*yf)
 
+    # remove low frequency noise
+    num_hfn = 6
+    xf = xf[num_hfn:]
+    amp = amp[num_hfn:]
+
     # plot the results
     fig = px.bar(x=xf,
                  y=amp,
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
-                 title=f"DFT of {col.upper()} ({npts} total pts used)")
+                 title=f"DFT of {col.upper()} ({npts} points used)")
     #fig.update_xaxes(range=[0, 2])
     st.plotly_chart(fig, use_container_width=True)
 
-    # try to find peaks
-    pos_mask = np.where(xf < 4)
+    # find peaks
+    min_freq = 0.1
+    max_freq = 4
+    pos_mask = np.where((xf > min_freq) & (xf < max_freq))
     freqs = xf[pos_mask]
     amps = amp[pos_mask]
     peaks, _ = find_peaks(amps, height=1e-14)
 
-    fig = px.bar(x=xf[peaks],
-                 y=amp[peaks],
+    fig = px.bar(x=freqs[peaks],
+                 y=amps[peaks],
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
                  title=f"DFT Peaks (for period < 4 days)")
-    st.plotly_chart(fig, use_container_width=True)
-
-    fig = px.line(x=t,
-                  y=irfft(yf).real,
-                  labels={"x": "time (days)", "y": "amplitude"},
-                  title=f"{col.upper()} - Restored Signal from IFFT")
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -694,11 +696,20 @@ def main():
     gravity = 'gravity_c' if pdl.temperature == 0 else 'gravity_c2'
     default_options = ['period', gravity, 'temperature', 'velocity']
 
-    # add to sidebar
+    # add data selection to sidebar
     options = sidebar.multiselect(
         label='Which data to plot?',
         options=avg_data.columns,
         default=default_options)
+
+    # add fft points to sidebar
+    mpts = 256
+    fftpts = sidebar.slider('How many points to use in FFT?',
+                            2*mpts,
+                            len(avg_data[gravity]),
+                            value=(mpts)*((len(avg_data[gravity]))//(mpts)),
+                            step=mpts,
+                            key="fftpts")
 
     st.info("#### :point_down: Aggregated data available to download")
     display.print(
@@ -752,9 +763,8 @@ def main():
         st.info(":point_left: Please select the **desired date** in the left menu")
         daily_plots(options, plot_date, avg_data)
 
-    # fft plots
-    fftpts = (62+63)*(len(avg_data[gravity])//(62+63))
-    fft_plot(avg_data[gravity],fftpts)
+    # fft plot in fftpts from slider
+    fft_plot(avg_data[gravity], fftpts)
 
     # copyright, version and running time info
     end = timer()
