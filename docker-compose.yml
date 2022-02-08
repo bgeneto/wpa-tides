@@ -2,7 +2,7 @@ version: "3.9"
 services:
   app:
     build: .
-    image: tides-streamlit:latest
+    image: streamlit:latest
     container_name: tides-streamlit
     hostname: tides
     restart: always
