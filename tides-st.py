@@ -227,9 +227,10 @@ def thermal_correction(raw_data: dict[str, pd.DataFrame]) -> pd.Series:
         # correction by length expansion/contraction
         raw_data[key]['gravity_c2'] = 4 * \
             math.pi**2*df['length_c']/df['period']**2
-        raw_data[key]['gravity_c'] = 4*math.pi**2*pdl.length * \
+        raw_data[key]['gravity_c'] = 4 * \
+            math.pi**2*pdl.length * \
             (1 + pdl.cte*(temperature_c[key] -
-             df['temperature']))/df['period']**2
+                          df['temperature']))/df['period']**2
 
     return temperature_c
 
@@ -661,20 +662,7 @@ def fft_plots(signal, npts: int = 0):
 
 
 def extra_plots(df):
-    # FIG 01
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    # Add traces
-    fig.add_trace(
-        go.Scatter(x=df.index, y=df['temperature'], name="temperature"),
-        secondary_y=False,
-    )
-    fig.add_trace(
-        go.Scatter(x=df.index, y=df['gravity_c2'], name="gravity_c2"),
-        secondary_y=True,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # FIG 02
+    # temperature vs corrected gravity
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     # Add traces
     fig.add_trace(
@@ -685,6 +673,12 @@ def extra_plots(df):
         go.Scatter(x=df.index, y=df['gravity_c2'], name="gravity_c2"),
         secondary_y=True,
     )
+    fig.update_layout(
+        title_text="length_c VS gravity_c2 (averaged - historical)"
+    )
+    # Set y-axes titles
+    fig.update_yaxes(title_text="length_c", secondary_y=False)
+    fig.update_yaxes(title_text="gravity_c2", secondary_y=True)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -870,7 +864,7 @@ def main():
     # fft plot in fftpts from slider
     fft_plots(avg_data[gravity], fftpts)
 
-    # extra_plots(avg_data)
+    extra_plots(avg_data)
 
     # copyright, version and running time info
     end = timer()
