@@ -1,7 +1,5 @@
-bs4
 numpy
 pandas
-pdfplumber
 plotly
 requests
 scipy
