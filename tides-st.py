@@ -22,6 +22,10 @@ History:  v1.0.0 Initial release
           v1.1.3 Using real fft version from scipy
           v1.1.4 Added slider for points in FFT
           v1.1.5 Added more historical plots
+          v1.2.5 Deleted low noise removal procedure
+                 Added error bars and std error computation
+                 Using os.replace to implement atomic file write
+                 Write all objects in one pickle file with pkl extension
 Usage:
     $ streamlit run tides-st.py
 """
@@ -31,6 +35,7 @@ import math
 import os
 import pickle
 import sys
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from re import S
@@ -52,9 +57,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.1.5"
+__version__ = "1.2.5"
 __status__ = "Development"
-__date__ = "20220207"
+__date__ = "20220209"
 
 
 def stop(code=0):
@@ -100,7 +105,7 @@ def mystdev(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFra
         percentile (float, optional): percentile to trim in both extremes. Defaults to 0.0.
 
     Returns:
-        pd.DataFrame: the (trimmed) mean (or std deviation) DataFrame
+        pd.DataFrame: the (trimmed) mean DataFrame
     """
     df = pd.DataFrame()
     ndf = pd.DataFrame()
@@ -115,6 +120,35 @@ def mystdev(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFra
             df.columns = cols
 
         ps = df.std(axis=0)
+        # ndf = ndf.append(ps.rename(key))  # append method is deprecated
+        ndf = pd.concat([ndf, ps.rename(key)], axis=1)
+
+    return ndf.transpose().sort_index()
+
+
+def mystderr(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFrame:
+    """Compute the (trimmed) standard error of a dictionary of DataFrames
+
+    Args:
+        dfd (pd.DataFrame): dictionary of DataFrames
+        percentile (float, optional): percentile to trim in both extremes. Defaults to 0.0.
+
+    Returns:
+        pd.DataFrame: the (trimmed) std error DataFrame
+    """
+    df = pd.DataFrame()
+    ndf = pd.DataFrame()
+    for key in dfd:
+        # remove the first column (samples) from the DataFrame
+        df = dfd[key].drop(dfd[key].columns[0], axis=1)
+
+        # remove outliers from the DataFrame if requested
+        if percentile != 0.0:
+            cols = df.columns
+            df = pd.DataFrame(stats.trimboth(df, percentile))
+            df.columns = cols
+
+        ps = df.std(axis=0)/math.sqrt(len(df.index))
         # ndf = ndf.append(ps.rename(key))  # append method is deprecated
         ndf = pd.concat([ndf, ps.rename(key)], axis=1)
 
@@ -145,7 +179,7 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame],
         if nlines < min_lines_csv:
             display.warning(
                 f"Ignoring file {key}. Wrong number of lines.")
-            csv.missing_files.append.append(key)
+            csv.missing_files.append(key)
             del raw_data[key]
 
     if len(raw_data) + len(csv.missing_files) == num_csv_files:
@@ -338,10 +372,10 @@ def st_layout(title: str = "Streamlit App") -> None:
     # hide main (top right) menu
     hide_menu_style = """
         <style>
-        #MainMenu {visibility: hidden;}
+        # MainMenu {visibility: hidden;}
         </style>
         """
-    #st.markdown(hide_menu_style, unsafe_allow_html=True)
+    # st.markdown(hide_menu_style, unsafe_allow_html=True)
 
 
 def download_archive(fn: str, output_dir: str) -> bool:
@@ -405,7 +439,7 @@ def exp_avg_data(csvfn: str, avg_data: pd.DataFrame, compress: bool = False) -> 
 
     # add zero-valued missing files
     for mfile in csv.missing_files:
-        exp_avg.loc[mfile] = 0
+        exp_avg.loc[mfile] = 0.0
 
     # reorder indexes after adding missing
     exp_avg.sort_index(inplace=True)
@@ -544,6 +578,25 @@ def historical_plots(options, avg_data):
     fig.update_yaxes(title_text="gravity_c2 (m/s²)", secondary_y=True)
     st.plotly_chart(fig, use_container_width=True)
 
+    # corrected length vs corrected gravity
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    # Add traces
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['length_c'], name="length_c"),
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(x=df.index, y=df['gravity_c2'], name="gravity_c2"),
+        secondary_y=True,
+    )
+    fig.update_layout(
+        title_text="length_c x gravity_c2 (averaged - historical)"
+    )
+    # Set y-axes titles
+    fig.update_yaxes(title_text="length_c", secondary_y=False)
+    fig.update_yaxes(title_text="gravity_c2", secondary_y=True)
+    st.plotly_chart(fig, use_container_width=True)
+
     # plot gravity comparison
     fig = px.line(df,
                   y=['gravity', 'gravity_c', 'gravity_c2'],
@@ -582,20 +635,25 @@ def individual_plots(options, plot_date, nlast, raw_data):
                 lsr = len(sr)
                 stdev = sr.std()
                 err = stdev/math.sqrt(lsr)
+                error_y = None if col in [
+                    'temperature', 'velocity'] else [err]*lsr
                 fig = px.scatter(sr,
                                  y=sr.values,
                                  x=sr.index,
                                  title=f"{col.upper()} @ {key} [{lsr} pts | err: {err:.3e}]",
                                  labels={"index": "oscillation", "y": sr.name},
-                                 trendline=tl)
+                                 trendline=tl,
+                                 error_y=error_y)
                 fig.data[0].update(mode=mode)
                 st.plotly_chart(fig, use_container_width=True)
 
 
-def daily_plots(options, plot_date, avg_data):
+def daily_plots_old(options, plot_date, avg_data, stderr_data):
+    '''daily plots with error bars'''
     for col in options:
         df = avg_data[col]
         sr = df.filter(like=plot_date)
+        esr = stderr_data[col].filter(like=plot_date)
         ldf = len(sr)
         if ldf > 0:
             avg = sr.mean()
@@ -604,8 +662,58 @@ def daily_plots(options, plot_date, avg_data):
                              y=sr.values,
                              x=sr.index,
                              title=f"{col.upper()} @ {plot_date} [{ldf} runs | avg: {avg:.7f} | stdev: {std:.3e}]",
-                             labels={"index": "run", "y": sr.name})
+                             labels={"index": "run", "y": sr.name},
+                             error_y=esr)
             fig.update_traces(mode='markers+lines')
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            display.warning("No data available in the selected day!")
+
+
+def daily_plots(options, plot_date, avg_data, stderr_data):
+    '''daily plots with continuous error bands'''
+    for col in options:
+        df = avg_data[col]
+        sr = df.filter(like=plot_date)
+        # std error upper and lower bounds
+        uerr = sr+stderr_data[col].filter(like=plot_date)
+        lerr = sr-stderr_data[col].filter(like=plot_date)
+        ldf = len(sr)
+        if ldf > 0:
+            avg = sr.mean()
+            std = sr.std()
+            fig = go.Figure([
+                go.Scatter(
+                    name=col,
+                    y=sr.values,
+                    x=sr.index,
+                    mode='markers+lines',
+                    showlegend=False
+                ),
+                go.Scatter(
+                    name='upper bound',
+                    y=uerr,
+                    x=sr.index,
+                    mode='lines',
+                    marker=dict(color="#224eb5"),
+                    line=dict(width=0),
+                    showlegend=False
+                ),
+                go.Scatter(
+                    name='lower bound',
+                    y=lerr,
+                    x=sr.index,
+                    marker=dict(color="#224eb5"),
+                    line=dict(width=0),
+                    mode='lines',
+                    fillcolor='rgba(34, 78, 181, 0.3)',
+                    fill='tonexty',
+                    showlegend=False
+                )
+            ])
+            fig.update_layout(
+                title=f"{col.upper()} @ {plot_date} [{ldf} runs | avg: {avg:.7f} | stdev: {std:.3e}]",
+                hovermode="x")
             st.plotly_chart(fig, use_container_width=True)
         else:
             display.warning("No data available in the selected day!")
@@ -633,32 +741,49 @@ def fft_plots(signal, npts: int = 0):
     # normalized amplitude/power:
     amp = np.abs(2.0/N*yf)
 
-    # remove low frequency noise
-    num_hfn = 6
-    xf = xf[num_hfn:]
-    amp = amp[num_hfn:]
+    # do not remove low frequency noise
+    if False:
+        num_hfn = 6
+        xf = xf[num_hfn:]
+        amp = amp[num_hfn:]
 
     # plot the results
     fig = px.bar(x=xf,
                  y=amp,
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
                  title=f"DFT of {col.upper()} ({npts} points used)")
-    #fig.update_xaxes(range=[0, 2])
+    # fig.update_xaxes(range=[0, 2])
     st.plotly_chart(fig, use_container_width=True)
 
-    # find peaks
-    min_freq = 0.1
-    max_freq = 4
-    pos_mask = np.where((xf > min_freq) & (xf < max_freq))
-    freqs = xf[pos_mask]
-    amps = amp[pos_mask]
-    peaks, _ = find_peaks(amps, height=1e-14)
-
-    fig = px.bar(x=freqs[peaks],
-                 y=amps[peaks],
+    xmask = np.where((xf >= 0.0) & (xf < 0.3))
+    fig = px.bar(x=xf[xmask],
+                 y=amp[xmask],
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
-                 title=f"DFT Peaks ({npts} points used)")
+                 title=f"(0-0.3) DFT of {col.upper()} ({npts} points used)")
+    # fig.update_xaxes(range=[0, 0.3])
     st.plotly_chart(fig, use_container_width=True)
+
+    xmask = np.where((xf >= 0.3) & (xf < 4.0))
+    fig = px.bar(x=xf[xmask],
+                 y=amp[xmask],
+                 labels={"x": "frequency (1/day)", "y": "amplitude"},
+                 title=f"(0.3-4) DFT of {col.upper()} ({npts} points used)")
+    # fig.update_xaxes(range=[0.3, 4])
+    st.plotly_chart(fig, use_container_width=True)
+
+    # find peaks (not working, is missing first n peaks)
+    # min_freq = 0.01
+    # max_freq = 4
+    # pos_mask = np.where((xf > min_freq) & (xf < max_freq))
+    # freqs = xf[pos_mask]
+    # amps = amp[pos_mask]
+    # peaks, _ = find_peaks(amps, height=0)
+
+    # fig = px.bar(x=freqs[peaks],
+    #              y=amps[peaks],
+    #              labels={"x": "frequency (1/day)", "y": "amplitude"},
+    #              title=f"DFT Peaks ({npts} points used)")
+    # st.plotly_chart(fig, use_container_width=True)
 
 
 def extra_plots(df):
@@ -674,7 +799,7 @@ def extra_plots(df):
         secondary_y=True,
     )
     fig.update_layout(
-        title_text="length_c VS gravity_c2 (averaged - historical)"
+        title_text="length_c x gravity_c2 (averaged - historical)"
     )
     # Set y-axes titles
     fig.update_yaxes(title_text="length_c", secondary_y=False)
@@ -721,8 +846,13 @@ def main():
             display.fatal("Cannot create output directory!")
             stop()
 
-    # count cached files
-    cached_files = [f for f in Path(input_dir).glob('*.pickle')]
+    # cache files per pendulum
+    cache_file = input_dir+'.pkl'
+    no_cache_file = False
+    if not os.path.isfile(cache_file):
+        no_cache_file = True
+        # required since os.replace gives error if file not exists
+        Path(cache_file).touch()
 
     # count current number of csv in input_dir
     all_files = [f for f in Path(input_dir).glob('*.csv')]
@@ -731,7 +861,9 @@ def main():
     # avoid multiple downloads from widget changes
     raw_data = {}
     avg_data = pd.DataFrame()
-    cache_miss = archive_too_old(archive, output_dir) or len(cached_files) < 1
+    stderr_data = pd.DataFrame()
+    cache_miss = archive_too_old(
+        archive, output_dir) or no_cache_file
     if cache_miss:
         # download compressed archive
         if not download_archive(archive, output_dir):
@@ -756,15 +888,13 @@ def main():
         # load/read csv files
         with st.spinner('Wait for it...'):
             raw_data = load_data(all_files)
-
         placeholder.empty()
     else:
         # load cached raw_data (deserialize)
-        with open(input_dir+'/raw.pickle', 'rb') as handle:
+        with open(cache_file, 'rb') as handle:
             raw_data = pickle.load(handle)
-        # load cached avg_data
-        with open(input_dir+'/avg.pickle', 'rb') as handle:
             avg_data = pickle.load(handle)
+            stderr_data = pickle.load(handle)
 
     # check missing lines then missing csv files
     check_missing_lines(raw_data, num_csv_files,
@@ -773,20 +903,29 @@ def main():
 
     # cte changed value, recompute
     if st.session_state.cte_changed or cache_miss:
-        # thermal expansion correction
-        temperature_c = thermal_correction(raw_data)
+        t0 = timer()
+        with st.spinner('Wait, computing average, error and corrected values...'):
+            # thermal expansion correction
+            temperature_c = thermal_correction(raw_data)
+            avg_data['temperature_c'] = temperature_c
 
-        # compute std dev and average data
-        avg_data = myavg(raw_data)
-        avg_data['temperature_c'] = temperature_c
+            # compute std dev and average data
+            avg_data = myavg(raw_data)
+            stderr_data = mystderr(raw_data)
+            tf = timer()
+            st.caption(f"Computation time: {tf-t0:.2f}")
 
-        # cache loaded data to disk (via pickle)
-        with open(input_dir+'/raw.pickle', 'wb') as handle:
-            pickle.dump(raw_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-        with open(input_dir+'/avg.pickle', 'wb') as handle:
-            pickle.dump(avg_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
+        # cache loaded data to disk (via pickle) using temp file (safer)
+        tmpfn = output_dir + os.sep + str(uuid.uuid4().hex)
+        try:
+            with open(tmpfn, 'wb') as handle:
+                pickle.dump(raw_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                pickle.dump(avg_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+                pickle.dump(stderr_data, handle,
+                            protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmpfn, cache_file)  # safer: atomic operation
+        except:
+            os.remove(tmpfn)
     st.info(
         ":bulb: *Local timezone is UTC–3 but all timestamps are displayed in UTC.*")
 
@@ -801,7 +940,7 @@ def main():
         default=default_options)
 
     # add fft points to sidebar
-    mpts = 256
+    mpts = 128
     fftpts = sidebar.slider('How many points to use in FFT?',
                             2*mpts,
                             len(avg_data[gravity]),
@@ -859,12 +998,12 @@ def main():
     with st.expander("..:: DAILY PLOTS ::.."):
         st.subheader("DAILY PLOTS")
         st.info(":point_left: Please select the **desired date** in the left menu")
-        daily_plots(options, plot_date, avg_data)
+        daily_plots(options, plot_date, avg_data, stderr_data)
 
     # fft plot in fftpts from slider
     fft_plots(avg_data[gravity], fftpts)
 
-    extra_plots(avg_data)
+    # extra_plots(avg_data)
 
     # copyright, version and running time info
     end = timer()
@@ -877,7 +1016,7 @@ def main():
 
 if __name__ == '__main__':
     # always run as a streamlit app
-    force_streamlit = False
+    force_streamlit = True
 
     # page title/header
     title = "WPA Tides Experiment - Realtime Data Visualization"
