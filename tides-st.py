@@ -26,6 +26,7 @@ History:  v1.0.0 Initial release
                  Added error bars and std error computation
                  Using os.replace to implement atomic file write
                  Write all objects in one pickle file with pkl extension
+          v1.2.6 Secondary pendulum selected by default
 Usage:
     $ streamlit run tides-st.py
 """
@@ -171,14 +172,29 @@ def filename_only(fn):
 def check_missing_lines(raw_data: dict[str, pd.DataFrame],
                         num_csv_files: int,
                         archive) -> None:
+    '''Ignore/remove files with insufficient lines and lines
+       with spurious data.
+    '''
+    # discard if moving average greater than period threshold
+    threshold = 0.005
+
     # min number of lines in csv files to be considered as valid
-    # interrupted run may occur
     min_lines_csv = 10 if csv.lines/2 > 10 else csv.lines/2
     for key, df in raw_data.items():
         nlines = len(df)
+        sr = df['period'].rolling(3).median()
+        difference = np.abs(df['period'] - sr)
+        outlier_idx = difference > threshold
+        num_outliers = len(df['period'][outlier_idx])
+        if num_outliers > 0:
+            # remove outliers and reset index
+            raw_data[key].drop(df[outlier_idx].index, inplace=True)
+            raw_data[key].reset_index(drop=True, inplace=True)
+            st.warning(
+                f":warning: Ignoring {num_outliers} outlier(s) line(s) in file {key}.csv")
         if nlines < min_lines_csv:
-            display.warning(
-                f"Ignoring file {key}. Wrong number of lines.")
+            st.warning(
+                f":warning: Ignoring file {key}. Wrong number of lines.")
             csv.missing_files.append(key)
             del raw_data[key]
 
@@ -196,8 +212,9 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame],
 
 
 def load_data(all_files: list) -> dict:
-    """Read all CSV files
-    We put all raw data from csv files into a dictionary of pandas DataFrame.
+    """Read all CSV files and check for missing lines or lines outside
+       the expected values. We put all raw data from csv files into
+       a dictionary of pandas DataFrame.
     """
     # read all files
     raw_data = {}
@@ -206,7 +223,7 @@ def load_data(all_files: list) -> dict:
             raw_data[f.stem] = pd.read_csv(f.resolve(), names=csv.colnames, skiprows=1,
                                            header=None, float_precision='round_trip')
         except:
-            pass
+            st.error(f":x: Error reading csv file named {f.stem}")
 
     # sort by date/filename
     ret = dict(sorted(raw_data.items()))
@@ -489,7 +506,7 @@ def initial_sidebar_config():
     # pendulum radio box
     sidebar.radio(
         "Please choose a pendulum:",
-        ('UnB Primary', 'UnB Secondary'),
+        ('UnB Secondary','UnB Primary'),
         index=0,
         key="pendulum",
         on_change=cte_status)
