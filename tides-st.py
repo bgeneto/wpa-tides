@@ -27,6 +27,7 @@ History:  v1.0.0 Initial release
                  Using os.replace to implement atomic file write
                  Write all objects in one pickle file with pkl extension
           v1.2.6 Secondary pendulum selected by default
+                 Added procedure to remove csv lines with spurious data (outliers)
 Usage:
     $ streamlit run tides-st.py
 """
@@ -58,9 +59,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.2.5"
+__version__ = "1.2.6"
 __status__ = "Development"
-__date__ = "20220209"
+__date__ = "20220210"
 
 
 def stop(code=0):
@@ -506,7 +507,7 @@ def initial_sidebar_config():
     # pendulum radio box
     sidebar.radio(
         "Please choose a pendulum:",
-        ('UnB Secondary','UnB Primary'),
+        ('UnB Secondary', 'UnB Primary'),
         index=0,
         key="pendulum",
         on_change=cte_status)
