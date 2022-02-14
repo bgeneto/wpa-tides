@@ -30,6 +30,7 @@ History:  v1.0.0 Initial release
                  Added procedure to remove csv lines with spurious data (outliers)
           v1.2.7 Start DFT plot from 0 to 4 instead of 0.3 to 4. 
                  Change CTE slider to radio. Added function to find optimum cte value                  
+          v1.2.8 Added interpolated fft plots
 
 Usage:
     $ streamlit run tides-st.py
@@ -42,6 +43,8 @@ import pickle
 import sys
 import uuid
 from datetime import datetime, timedelta
+from multiprocessing import Pool
+from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from timeit import default_timer as timer
 from types import SimpleNamespace
@@ -62,9 +65,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.2.7"
+__version__ = "1.2.8"
 __status__ = "Development"
-__date__ = "20220213"
+__date__ = "20220214"
 
 
 def stop(code=0):
@@ -752,6 +755,75 @@ def daily_plots(options, plot_date, avg_data, stderr_data):
             display.warning("No data available in the selected day!")
 
 
+def interpolated_fft_plots(signal, npts: int = 0):
+    from scipy.fft import rfft, rfftfreq
+    from scipy.signal import find_peaks
+
+    col = signal.name
+    avg = signal.mean()
+    s = (signal-avg)
+    s = s[0:npts]
+    mult = 2
+    idx = range(0, mult*len(s.index))
+    sr = pd.Series(index=idx, name=col)
+    sr.iloc[::2] = s.iloc[::1]
+    sr = sr.interpolate(method='spline', order=3)
+    idx = range(0, mult*len(sr.index))
+    nsr = pd.Series(index=idx, name=col)
+    nsr.iloc[::2] = sr.iloc[::1]
+    nsr = nsr.interpolate(method='spline', order=3)
+    nsr = nsr.to_numpy()
+
+    # using scipy fft: it is faster
+    yf = rfft(nsr)
+    N = len(nsr)
+    # time scale in days
+    day = 24*60.0  # min
+    dt = float(exp.dt)/mult/mult/day  # dt in unit of days
+    t = np.linspace(0, N*dt, N, endpoint=False)
+    xf = rfftfreq(N, dt)
+
+    # normalized amplitude/power:
+    amp = np.abs(2.0/N*yf)
+
+    # plot the results
+    fig = px.bar(x=xf,
+                 y=amp,
+                 labels={"x": "frequency (1/day)", "y": "amplitude"},
+                 title=f"Interpolated DFT of {col.upper()} ({N} points used)")
+    fig.update_yaxes(range=[0, 200e-6])
+    fig.update_traces(marker_color='red')
+    fig.update_layout({
+        'plot_bgcolor': 'rgba(0, 0, 0, 0)',
+        'hovermode': "x"
+    })
+    st.plotly_chart(fig, use_container_width=True)
+
+    xmask = np.where((xf >= 0.0) & (xf < 0.3))
+    fig = px.bar(x=xf[xmask],
+                 y=amp[xmask],
+                 labels={"x": "frequency (1/day)", "y": "amplitude"},
+                 title=f"(0-0.3) Interpolated DFT of {col.upper()} ({N} points used)")
+    fig.update_traces(marker_color='red')
+    fig.update_layout({
+        'plot_bgcolor': 'rgba(0, 0, 0, 0)',
+        'hovermode': "x"
+    })
+    st.plotly_chart(fig, use_container_width=True)
+
+    xmask = np.where((xf >= 0.0) & (xf < 4.0))
+    fig = px.bar(x=xf[xmask],
+                 y=amp[xmask],
+                 labels={"x": "frequency (1/day)", "y": "amplitude"},
+                 title=f"(0.0-4) Interpolated DFT of {col.upper()} ({N} points used)")
+    fig.update_traces(marker_color='red')
+    fig.update_layout({
+        'plot_bgcolor': 'rgba(0, 0, 0, 0)',
+        'hovermode': "x"
+    })
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def fft_plots(signal, npts: int = 0):
     from scipy.fft import rfft, rfftfreq
     from scipy.signal import find_peaks
@@ -784,7 +856,7 @@ def fft_plots(signal, npts: int = 0):
     fig = px.bar(x=xf,
                  y=amp,
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
-                 title=f"DFT of {col.upper()} ({npts} points used)")
+                 title=f"DFT of {col.upper()} ({N} points used)")
     # fig.update_xaxes(range=[0, 2])
     st.plotly_chart(fig, use_container_width=True)
 
@@ -792,7 +864,7 @@ def fft_plots(signal, npts: int = 0):
     fig = px.bar(x=xf[xmask],
                  y=amp[xmask],
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
-                 title=f"(0-0.3) DFT of {col.upper()} ({npts} points used)")
+                 title=f"(0-0.3) DFT of {col.upper()} ({N} points used)")
     # fig.update_xaxes(range=[0, 0.3])
     st.plotly_chart(fig, use_container_width=True)
 
@@ -800,7 +872,7 @@ def fft_plots(signal, npts: int = 0):
     fig = px.bar(x=xf[xmask],
                  y=amp[xmask],
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
-                 title=f"(0.0-4) DFT of {col.upper()} ({npts} points used)")
+                 title=f"(0.0-4) DFT of {col.upper()} ({N} points used)")
     # fig.update_xaxes(range=[0.0, 4])
     st.plotly_chart(fig, use_container_width=True)
 
@@ -939,16 +1011,18 @@ def main():
                         os.path.join(output_dir, archive))
     check_missing_files(raw_data)
 
-    # start = timer()
-    # with st.spinner('Computing best CTE value...'):
-    #     # best_cte = cte_optimization(
-    #     #    dict(itertools.islice(raw_data.items(), 944, 1504)))
-    #     arg = dict(itertools.islice(raw_data.items(), 1060, 1501))
-    #     results = Parallel(n_jobs=12)(delayed(cte_optimization)(x, arg)
-    #                                   for x in 1.e-6*np.arange(14.0, 44.0, 0.03125))
-    # best_cte = min(results, key = lambda t: t[1])[0]
-    # end = timer()
-    # st.subheader(f"best_cte = {best_cte}")
+    if compute_best_cte:
+        start = timer()
+        with st.spinner('Computing best CTE value...'):
+            # best_cte = cte_optimization(
+            #    dict(itertools.islice(raw_data.items(), 944, 1504)))
+            arg = dict(itertools.islice(raw_data.items(), 1060, 1501))
+            results = Parallel(n_jobs=12)(delayed(cte_optimization)(x, arg)
+                                          for x in 1.e-6*np.arange(14.0, 44.0, 0.03125))
+            best_cte = min(results, key=lambda t: t[1])[0]
+            end = timer()
+        st.subheader(f"best_cte = {best_cte}")
+        st.caption(f"Time: {end-start}s")
 
     # cte changed value, recompute
     if st.session_state.cte_changed or cache_miss:
@@ -1052,6 +1126,8 @@ def main():
     # fft plot in fftpts from slider
     fft_plots(avg_data[gravity], fftpts)
 
+    interpolated_fft_plots(avg_data[gravity], fftpts)
+
     # extra_plots(avg_data)
 
     # copyright, version and running time info
@@ -1066,6 +1142,9 @@ def main():
 if __name__ == '__main__':
     # always run as a streamlit app
     force_streamlit = True
+
+    # compute best cte only once and use the result
+    compute_best_cte = False
 
     # page title/header
     title = "WPA Tides Experiment - Realtime Data Visualization"
