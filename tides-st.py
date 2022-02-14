@@ -28,11 +28,14 @@ History:  v1.0.0 Initial release
                  Write all objects in one pickle file with pkl extension
           v1.2.6 Secondary pendulum selected by default
                  Added procedure to remove csv lines with spurious data (outliers)
+          v1.2.7 Start DFT plot from 0 to 4 instead of 0.3 to 4. 
+                 Change CTE slider to radio. Added function to find optimum cte value                  
+
 Usage:
     $ streamlit run tides-st.py
 """
 
-import base64
+import itertools
 import math
 import os
 import pickle
@@ -40,7 +43,6 @@ import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from re import S
 from timeit import default_timer as timer
 from types import SimpleNamespace
 from typing import Callable
@@ -49,6 +51,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from joblib import Parallel, delayed
 from plotly.subplots import make_subplots
 from scipy import stats
 
@@ -59,9 +62,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.2.6"
+__version__ = "1.2.7"
 __status__ = "Development"
-__date__ = "20220210"
+__date__ = "20220213"
 
 
 def stop(code=0):
@@ -192,7 +195,7 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame],
             raw_data[key].drop(df[outlier_idx].index, inplace=True)
             raw_data[key].reset_index(drop=True, inplace=True)
             st.warning(
-                f":warning: Ignoring {num_outliers} outlier(s) line(s) in file {key}.csv")
+                f":warning: Removing {num_outliers} outlier(s) line(s) in file {key}.csv")
         if nlines < min_lines_csv:
             st.warning(
                 f":warning: Ignoring file {key}. Wrong number of lines.")
@@ -260,6 +263,18 @@ def check_missing_files(raw_data: dict[str, pd.DataFrame]) -> None:
         d1 = d2
 
     st.warning(wstr)
+
+
+def cte_optimization(cte: float, raw_data: dict[str, pd.DataFrame]) -> int:
+    ndf = pd.DataFrame()
+    for key, df in raw_data.items():
+        ndf.loc[key, 'length'] = (pdl.length *
+                                  (1 + cte*(df['temperature'] - pdl.temperature))).mean()
+        ndf.loc[key, 'gravity'] = (4 *
+                                   math.pi**2*ndf.loc[key, 'length']/df['period']**2).mean()
+    # compute variance
+    variance = ndf['gravity'].var()
+    return (cte, variance)
 
 
 def thermal_correction(raw_data: dict[str, pd.DataFrame]) -> pd.Series:
@@ -440,18 +455,6 @@ def extract_archive(fn: str, output_dir: str) -> bool:
     return True
 
 
-def get_table_download_link(df, fn):
-    """Generates a link allowing the data in a given panda dataframe to be downloaded
-    in:  dataframe
-    out: href string
-    """
-    csv_file = df.to_csv(index=True)
-    # some strings <-> bytes conversions necessary here
-    b64 = base64.b64encode(csv_file.encode()).decode()
-    href = f'<a href="data:file/csv;base64,{b64}" download="{fn}">download csv file</a>'
-    return href
-
-
 def exp_avg_data(csvfn: str, avg_data: pd.DataFrame, compress: bool = False) -> str:
     exp_avg = avg_data.copy()
 
@@ -498,6 +501,8 @@ def archive_too_old(fn: str, output_dir: str) -> bool:
 
 def cte_status():
     st.session_state.cte_changed = True
+    index = st.session_state.cte_radio
+    st.session_state.cte = exp.cte[index]
 
 
 def initial_sidebar_config():
@@ -513,16 +518,25 @@ def initial_sidebar_config():
         on_change=cte_status)
     # date selector
     sidebar.date_input("Choose a day to plot:", key="plot_date")
-    # CTE slider
+    # default session values
     if 'cte_changed' not in st.session_state:
         st.session_state.cte_changed = False
-    sidebar.slider('Wire CTE ⨯ 10⁻⁶ (default = 14):',
-                   1,
-                   100,
-                   step=1,
-                   value=14,
-                   key="cte",
-                   on_change=cte_status)
+        st.session_state.cte = 14
+    # CTE slider
+    # sidebar.slider('Wire CTE ⨯ 10⁻⁶ (default = 14):',
+    #               1,
+    #               100,
+    #               step=1,
+    #               value=14,
+    #               key="cte",
+    #               on_change=cte_status)
+    sidebar.radio(
+        "Wire CTE value:",
+        ('default', f'optimized'),
+        index=0,
+        key="cte_radio",
+        on_change=cte_status)
+
     # number of individual plots slider
     sidebar.slider('How many individual plots?',
                    1,
@@ -651,6 +665,7 @@ def individual_plots(options, plot_date, nlast, raw_data):
             if col in nraw_data[key].columns:
                 sr = nraw_data[key][col]
                 lsr = len(sr)
+                avg = sr.mean()
                 stdev = sr.std()
                 err = stdev/math.sqrt(lsr)
                 error_y = None if col in [
@@ -658,7 +673,7 @@ def individual_plots(options, plot_date, nlast, raw_data):
                 fig = px.scatter(sr,
                                  y=sr.values,
                                  x=sr.index,
-                                 title=f"{col.upper()} @ {key} [{lsr} pts | err: {err:.3e}]",
+                                 title=f"{col.upper()} @ {key} [{lsr} pts | avg: {avg:.7f} | err: {err:.3e}]",
                                  labels={"index": "oscillation", "y": sr.name},
                                  trendline=tl,
                                  error_y=error_y)
@@ -781,12 +796,12 @@ def fft_plots(signal, npts: int = 0):
     # fig.update_xaxes(range=[0, 0.3])
     st.plotly_chart(fig, use_container_width=True)
 
-    xmask = np.where((xf >= 0.3) & (xf < 4.0))
+    xmask = np.where((xf >= 0.0) & (xf < 4.0))
     fig = px.bar(x=xf[xmask],
                  y=amp[xmask],
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
-                 title=f"(0.3-4) DFT of {col.upper()} ({npts} points used)")
-    # fig.update_xaxes(range=[0.3, 4])
+                 title=f"(0.0-4) DFT of {col.upper()} ({npts} points used)")
+    # fig.update_xaxes(range=[0.0, 4])
     st.plotly_chart(fig, use_container_width=True)
 
     # find peaks (not working, is missing first n peaks)
@@ -828,9 +843,12 @@ def extra_plots(df):
 def main():
     start = timer()
 
+    # optimum cte value (run cte_optimization to calculate)
+    exp.cte = {'default': 14, 'optimized': 40.59375}
+
     sidebar = initial_sidebar_config()
 
-    # wire cte from slider
+    # selected wire cte from widget
     pdl.cte = 1e-6*st.session_state.cte
 
     # pendulum data according to the location
@@ -850,6 +868,8 @@ def main():
         stop()
 
     st.subheader(f"Showing :ocean: data from: **{p} Pendulum**")
+    st.info(
+        f":bulb: Using CTE = {pdl.cte:.4e}")
 
     # create output directory
     output_dir = 'data'
@@ -918,6 +938,17 @@ def main():
     check_missing_lines(raw_data, num_csv_files,
                         os.path.join(output_dir, archive))
     check_missing_files(raw_data)
+
+    # start = timer()
+    # with st.spinner('Computing best CTE value...'):
+    #     # best_cte = cte_optimization(
+    #     #    dict(itertools.islice(raw_data.items(), 944, 1504)))
+    #     arg = dict(itertools.islice(raw_data.items(), 1060, 1501))
+    #     results = Parallel(n_jobs=12)(delayed(cte_optimization)(x, arg)
+    #                                   for x in 1.e-6*np.arange(14.0, 44.0, 0.03125))
+    # best_cte = min(results, key = lambda t: t[1])[0]
+    # end = timer()
+    # st.subheader(f"best_cte = {best_cte}")
 
     # cte changed value, recompute
     if st.session_state.cte_changed or cache_miss:
@@ -1026,7 +1057,7 @@ def main():
     # copyright, version and running time info
     end = timer()
     st.caption(
-        f":copyright: 2022 bgeneto | Version: {__version__} | Execution time: {(end-start):.2f}")
+        f":copyright: 2022 bgeneto | Version: {__version__} | Execution: {(end-start):.2f}s")
 
     # reset cte change status
     st.session_state.cte_changed = False
