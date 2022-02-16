@@ -1083,8 +1083,8 @@ def main():
     if compute_best_cte:
         with st.spinner('Computing best CTE value...'):
             arg = dict(itertools.islice(raw_data.items(), 1060, 1501))
-            results = Parallel(n_jobs=-2)(delayed(cte_optimization)(x, arg)
-                                          for x in 1.e-6*np.arange(14.0, 45.0, 0.03125))
+            results = Parallel(n_jobs=nthreads)(delayed(cte_optimization)(x, arg)
+                                                for x in 1.e-6*np.arange(14.0, 45.0, 0.03125))
             best_cte = min(results, key=lambda t: t[1])[0]
         st.subheader(f"best_cte = {best_cte}")
 
@@ -1097,7 +1097,7 @@ def main():
             if not parallel_computing:
                 avg_data['temperature_c'] = thermal_correction(raw_data)
             else:
-                with parallel_backend('multiprocessing', n_jobs=-2):
+                with parallel_backend('multiprocessing', n_jobs=nthreads):
                     results = Parallel()(delayed(par_thermal_correction)(
                         key, df) for key, df in raw_data.items())
                 if cache_miss:
@@ -1110,7 +1110,7 @@ def main():
                 avg_data = myavg(raw_data)
                 stderr_data = mystderr(raw_data)
             else:
-                with parallel_backend('multiprocessing', n_jobs=-2):
+                with parallel_backend('multiprocessing', n_jobs=nthreads):
                     results = Parallel()(delayed(par_myavg_err)(
                         key, df) for key, df in raw_data.items())
 
@@ -1233,6 +1233,7 @@ if __name__ == '__main__':
 
     # enable parallel processing
     parallel_computing = True
+    nthreads = os.cpu_count()//2
 
     # page title/header
     title = "WPA Tides Experiment - Realtime Data Visualization"
