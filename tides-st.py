@@ -32,6 +32,8 @@ History:  v1.0.0 Initial release
                  Change CTE slider to radio. Added function to find optimum cte value
           v1.2.8 Added interpolated fft plots
           v1.2.9 Select max number of points for fft plots
+          v1.3.9 Extract csv files in memory and load them in memory
+                 Compute avg and std err in parallel
 
 Usage:
     $ streamlit run tides-st.py
@@ -39,7 +41,6 @@ Usage:
 
 import itertools
 import math
-from operator import rshift
 import os
 import pickle
 import sys
@@ -66,9 +67,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.2.9"
+__version__ = "1.3.9"
 __status__ = "Development"
-__date__ = "20220215"
+__date__ = "20220216"
 
 
 def stop(code=0):
@@ -78,7 +79,10 @@ def stop(code=0):
 
 
 def par_myavg_err(key: str, df: pd.DataFrame) -> pd.Series:
-    return df.mean(axis=0).rename(key), df.std(axis=0).rename(key)/math.sqrt(len(df.index))
+    df = df.drop(columns=['sample', 'gravity_pic'])
+    avg = df.mean(axis=0).rename(key)
+    err = df.std(axis=0).rename(key)/math.sqrt(len(df.index))
+    return avg, err
 
 
 def myavg(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFrame:
@@ -95,7 +99,8 @@ def myavg(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFrame
     ndf = pd.DataFrame()
     for key in dfd:
         # remove the first column (samples) from the DataFrame
-        df = dfd[key].drop(dfd[key].columns[0], axis=1)
+        #df = dfd[key].drop(dfd[key].columns[0], axis=1)
+        df = dfd[key].drop(columns=['sample', 'gravity_pic'])
 
         # (optional) remove outliers from the DataFrame
         if percentile != 0.0:
@@ -124,9 +129,10 @@ def mystdev(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFra
     ndf = pd.DataFrame()
     for key in dfd:
         # remove the first column (samples) from the DataFrame
-        df = dfd[key].drop(dfd[key].columns[0], axis=1)
+        # df = dfd[key].drop(dfd[key].columns[0], axis=1)
+        df = dfd[key].drop(columns=['sample', 'gravity_pic'])
 
-        # remove outliers from the DataFrame if requested
+        # (optional) remove outliers from the DataFrame if requested
         if percentile != 0.0:
             cols = df.columns
             df = pd.DataFrame(stats.trimboth(df, percentile))
@@ -141,7 +147,7 @@ def mystdev(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFra
 
 def par_mystderr(key: str, df: pd.DataFrame) -> pd.Series:
     # remove the first column (samples) from the DataFrame
-    df = df.drop(df.columns[0], axis=1)
+    df = df.drop(columns=['sample', 'gravity_pic'])
     ps = df.std(axis=0)/math.sqrt(len(df.index))
     return ps
 
@@ -160,7 +166,8 @@ def mystderr(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFr
     ndf = pd.DataFrame()
     for key in dfd:
         # remove the first column (samples) from the DataFrame
-        df = dfd[key].drop(dfd[key].columns[0], axis=1)
+        # df = dfd[key].drop(dfd[key].columns[0], axis=1)
+        df = dfd[key].drop(columns=['sample', 'gravity_pic'])
 
         # remove outliers from the DataFrame if requested
         if percentile != 0.0:
@@ -198,7 +205,7 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame],
     threshold = 0.002
 
     # min number of lines in csv files to be considered as valid
-    min_lines_csv = 10 if csv.lines/2 > 10 else csv.lines/2
+    min_lines_csv = 10 if mycsv.lines/2 > 10 else mycsv.lines/2
     wstr = ''
     for key, df in raw_data.items():
         nlines = len(df)
@@ -214,10 +221,10 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame],
         if nlines < min_lines_csv:
             st.warning(
                 f":warning: Ignoring file {key}. Wrong number of lines.")
-            csv.missing_files.append(key)
+            mycsv.missing_files.append(key)
             del raw_data[key]
 
-    if len(raw_data) + len(csv.missing_files) == num_csv_files:
+    if len(raw_data) + len(mycsv.missing_files) == num_csv_files:
         st.success(
             f":white_check_mark: {num_csv_files} files successfully processed!")
     else:
@@ -239,7 +246,7 @@ def par_load_data(f):
        a dictionary of pandas DataFrame.
     """
     try:
-        df = pd.read_csv(f.resolve(), names=csv.colnames, skiprows=1,
+        df = pd.read_csv(f.resolve(), names=mycsv.colnames, skiprows=1,
                          header=None, float_precision='round_trip')
     except:
         st.error(f":x: Error reading csv file named {f.stem}")
@@ -256,7 +263,7 @@ def load_data(all_files: list) -> dict:
     raw_data = {}
     for f in all_files:
         try:
-            raw_data[f.stem] = pd.read_csv(f.resolve(), names=csv.colnames, skiprows=1,
+            raw_data[f.stem] = pd.read_csv(f.resolve(), names=mycsv.colnames, skiprows=1,
                                            header=None, float_precision='round_trip')
         except:
             st.error(f":x: Error reading csv file named {f.stem}")
@@ -273,7 +280,7 @@ def check_missing_files(raw_data: dict[str, pd.DataFrame]) -> None:
     In other words, check if we missed any pendulum runs.
     """
     try:
-        d1 = datetime.strptime(list(raw_data)[0], csv.date_format)
+        d1 = datetime.strptime(list(raw_data)[0], mycsv.date_format)
     except Exception as e:
         display.fatal(
             "Wrong date format! Please check provided csv date format.")
@@ -281,7 +288,7 @@ def check_missing_files(raw_data: dict[str, pd.DataFrame]) -> None:
 
     wstr = ''
     for dtime in raw_data:
-        d2 = datetime.strptime(dtime, csv.date_format)
+        d2 = datetime.strptime(dtime, mycsv.date_format)
         dt = (d2 - d1).total_seconds()/60.0
         n = math.floor(dt/exp.dt) - 1
         if dt > exp.dt and n > 0:
@@ -289,8 +296,8 @@ def check_missing_files(raw_data: dict[str, pd.DataFrame]) -> None:
             for m in range(1, n+1):
                 mfile = (
                     d2 - timedelta(minutes=exp.dt*m)
-                ).strftime(csv.date_format)
-                csv.missing_files.append(mfile)
+                ).strftime(mycsv.date_format)
+                mycsv.missing_files.append(mfile)
         # update date
         d1 = d2
 
@@ -470,7 +477,7 @@ def st_layout(title: str = "Streamlit App") -> None:
 
 def download_archive(fn: str, output_dir: str) -> bool:
     """Download file from Nextcloud"""
-    display.wait("Downloading pendulum archive data...")
+    display.wait("Downloading pendulum data archive...")
     import requests
     fpath = os.path.join(output_dir, fn)
     share_id = 'kbiz4qzDdkFAygb'
@@ -497,7 +504,30 @@ def download_archive(fn: str, output_dir: str) -> bool:
     return True
 
 
+def extract_to_memory_and_load_data(fn: str, output_dir: str) -> dict:
+    """Extract all files to memory and use pandas read_csv to load data in memory"""
+    display.wait("Extracting archive and loading csv data...")
+    import tarfile
+    fpath = os.path.join(output_dir, fn)
+    raw_data = {}
+    with tarfile.open(fpath, "r:gz") as tar:
+        for tarinfo in tar:
+            if tarinfo.isfile():
+                fname = filename_only(tarinfo.name)
+                buffer = tar.extractfile(tarinfo)
+                try:
+                    raw_data[fname] = pd.read_csv(buffer, names=mycsv.colnames, skiprows=1,
+                                                  header=None, float_precision='round_trip')
+                except:
+                    st.error(
+                        f":x: Error reading csv file named {tarinfo.name}")
+
+    # sort by date/filename
+    return dict(sorted(raw_data.items()))
+
+
 def extract_archive(fn: str, output_dir: str) -> bool:
+    """Extracts all files in a tgz file to disk"""
     display.wait("Extracting archive data...")
     import tarfile
     fpath = os.path.join(output_dir, fn)
@@ -516,7 +546,7 @@ def exp_avg_data(csvfn: str, avg_data: pd.DataFrame, compress: bool = False) -> 
     exp_avg = avg_data.copy()
 
     # add zero-valued missing files
-    for mfile in csv.missing_files:
+    for mfile in mycsv.missing_files:
         exp_avg.loc[mfile] = 0.0
 
     # reorder indexes after adding missing
@@ -1018,14 +1048,7 @@ def main():
         # required since os.replace gives error if file not exists
         Path(cache_file).touch()
 
-    # count current number of csv in input_dir
-    all_files = [f for f in Path(input_dir).glob('*.csv')]
-    num_csv_files = len(all_files)
-
     # avoid multiple downloads from widget changes
-    raw_data = {}
-    avg_data = pd.DataFrame()
-    stderr_data = pd.DataFrame()
     cache_miss = archive_too_old(
         archive, output_dir) or no_cache_file
     if cache_miss:
@@ -1036,33 +1059,12 @@ def main():
             st.warning("Try again by reloading this page (F5).")
             stop()
 
-        # extract downloaded file
-        if not extract_archive(archive, output_dir):
-            display.fatal("Error extracting the compressed archive!")
-            stop()
-
-        # after extracting, we list of all csv in input_dir for reading
-        all_files = [f for f in Path(input_dir).glob('*.csv')]
-        num_csv_files = len(all_files)
-
-        placeholder = st.empty()
-        placeholder.write(
-            "#### :stopwatch: Please wait while parsing csv files...")
-
-        # load/read csv files
-        with st.spinner('Wait for it...'):
-            if not parallel_computing:
-                raw_data = load_data(all_files)
-            else:
-                with parallel_backend('multiprocessing', n_jobs=-2):
-                    results = Parallel()(delayed(par_load_data)(f)
-                                         for f in all_files)
-                # join data
-                for key, df in results:
-                    raw_data[key] = df
-                # sort data
-                raw_data = dict(sorted(raw_data.items()))
-        placeholder.empty()
+        # new: extract to memory and load data in one pass
+        raw_data = extract_to_memory_and_load_data(archive, output_dir)
+        # check missing lines then missing csv files
+        check_missing_lines(raw_data, len(raw_data),
+                            os.path.join(output_dir, archive))
+        check_missing_files(raw_data)
     else:
         # load cached raw_data (deserialize)
         try:
@@ -1070,16 +1072,13 @@ def main():
                 raw_data = pickle.load(handle)
                 avg_data = pickle.load(handle)
                 stderr_data = pickle.load(handle)
+                mycsv.missing_files = pickle.load(handle)
+
         except:
             st.error(
                 ":x: Corrupted cached data! Please refresh (F5) this page.")
             os.remove(cache_file)
             stop()
-
-    # check missing lines then missing csv files
-    check_missing_lines(raw_data, num_csv_files,
-                        os.path.join(output_dir, archive))
-    check_missing_files(raw_data)
 
     if compute_best_cte:
         with st.spinner('Computing best CTE value...'):
@@ -1107,8 +1106,18 @@ def main():
                         avg_data.loc[key, 'temperature_c'] = tc
 
             # compute std dev and average data
-            avg_data = myavg(raw_data)
-            stderr_data = mystderr(raw_data)
+            if not parallel_computing:
+                avg_data = myavg(raw_data)
+                stderr_data = mystderr(raw_data)
+            else:
+                with parallel_backend('multiprocessing', n_jobs=-2):
+                    results = Parallel()(delayed(par_myavg_err)(
+                        key, df) for key, df in raw_data.items())
+
+                avg_data = pd.DataFrame([sr[0] for sr in results]).sort_index()
+                stderr_data = pd.DataFrame(
+                    [sr[1] for sr in results]).sort_index()
+
             tf = timer()
             st.caption(f"Computation time: {tf-t0:.2f}")
 
@@ -1119,6 +1128,8 @@ def main():
                 pickle.dump(raw_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
                 pickle.dump(avg_data, handle, protocol=pickle.HIGHEST_PROTOCOL)
                 pickle.dump(stderr_data, handle,
+                            protocol=pickle.HIGHEST_PROTOCOL)
+                pickle.dump(mycsv.missing_files, handle,
                             protocol=pickle.HIGHEST_PROTOCOL)
             os.replace(tmpfn, cache_file)  # safer: atomic operation
         except:
@@ -1233,13 +1244,13 @@ if __name__ == '__main__':
     exp = Experiment(dx=15, dt=23, osc=64)
 
     # csv anonymous class
-    csv = SimpleNamespace(lines=exp.osc,
-                          date_format="%Y-%m-%dT%Hh%M",
-                          missing_files=[])
+    mycsv = SimpleNamespace(lines=exp.osc,
+                            date_format="%Y-%m-%dT%Hh%M",
+                            missing_files=[])
 
     # rename columns in csv files
-    csv.colnames = ['sample', 'period',
-                    'gravity_pic', 'velocity', 'temperature']
+    mycsv.colnames = ['sample', 'period',
+                      'gravity_pic', 'velocity', 'temperature']
 
     # increase pandas default output precision from 6 decimal places to 7
     pd.set_option("display.precision", 7)
