@@ -31,6 +31,7 @@ History:  v1.0.0 Initial release
           v1.2.7 Start DFT plot from 0 to 4 instead of 0.3 to 4. 
                  Change CTE slider to radio. Added function to find optimum cte value                  
           v1.2.8 Added interpolated fft plots
+          v1.2.9 Select max number of points for fft plots
 
 Usage:
     $ streamlit run tides-st.py
@@ -38,13 +39,13 @@ Usage:
 
 import itertools
 import math
+from operator import rshift
 import os
 import pickle
 import sys
 import uuid
 from datetime import datetime, timedelta
 from multiprocessing import Pool
-from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from timeit import default_timer as timer
 from types import SimpleNamespace
@@ -54,7 +55,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, parallel_backend
 from plotly.subplots import make_subplots
 from scipy import stats
 
@@ -65,15 +66,19 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.2.8"
+__version__ = "1.2.9"
 __status__ = "Development"
-__date__ = "20220214"
+__date__ = "20220215"
 
 
 def stop(code=0):
     if st._is_running_with_streamlit:
         st.stop()
     sys.exit(code)
+
+
+def par_myavg_err(key: str, df: pd.DataFrame) -> pd.Series:
+    return df.mean(axis=0).rename(key), df.std(axis=0).rename(key)/math.sqrt(len(df.index))
 
 
 def myavg(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFrame:
@@ -132,6 +137,13 @@ def mystdev(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFra
         ndf = pd.concat([ndf, ps.rename(key)], axis=1)
 
     return ndf.transpose().sort_index()
+
+
+def par_mystderr(key: str, df: pd.DataFrame) -> pd.Series:
+    # remove the first column (samples) from the DataFrame
+    df = df.drop(df.columns[0], axis=1)
+    ps = df.std(axis=0)/math.sqrt(len(df.index))
+    return ps
 
 
 def mystderr(dfd: dict[str, pd.DataFrame], percentile: float = 0.0) -> pd.DataFrame:
@@ -218,6 +230,20 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame],
         stop()
 
 
+def par_load_data(f):
+    """Read all CSV files and check for missing lines or lines outside
+       the expected values. We put all raw data from csv files into
+       a dictionary of pandas DataFrame.
+    """
+    try:
+        df = pd.read_csv(f.resolve(), names=csv.colnames, skiprows=1,
+                         header=None, float_precision='round_trip')
+    except:
+        st.error(f":x: Error reading csv file named {f.stem}")
+
+    return f.stem, df
+
+
 def load_data(all_files: list) -> dict:
     """Read all CSV files and check for missing lines or lines outside
        the expected values. We put all raw data from csv files into
@@ -278,6 +304,30 @@ def cte_optimization(cte: float, raw_data: dict[str, pd.DataFrame]) -> int:
     # compute variance
     variance = ndf['gravity'].var()
     return (cte, variance)
+
+
+def par_thermal_correction(key: str, df: pd.DataFrame) -> tuple[str, pd.DataFrame]:
+    ret = pd.DataFrame(index=df.index)
+    if pdl.temperature == 0.0:
+        # use only first points to compute mean temperature
+        # thermistor inside abs enclosure issue
+        temperature_c = df['temperature'][0:6].mean()
+        ret['length_c'] = pdl.length
+    else:
+        temperature_c = df['temperature'].mean()
+        ret['length_c'] = pdl.length * \
+            (1 + pdl.cte*(df['temperature'] - pdl.temperature))
+    # uncorredted gravity
+    ret['gravity'] = 4*math.pi**2*pdl.length/df['period']**2
+    # correction by length expansion/contraction
+    ret['gravity_c2'] = 4 * \
+        math.pi**2*ret['length_c']/df['period']**2
+    ret['gravity_c'] = 4 * \
+        math.pi**2*pdl.length * \
+        (1 + pdl.cte*(temperature_c -
+                      df['temperature']))/df['period']**2
+
+    return key, ret, temperature_c
 
 
 def thermal_correction(raw_data: dict[str, pd.DataFrame]) -> pd.Series:
@@ -544,7 +594,7 @@ def initial_sidebar_config():
     sidebar.slider('How many individual plots?',
                    1,
                    10,
-                   value=3,
+                   value=1,
                    step=1,
                    key="nlast")
 
@@ -997,14 +1047,30 @@ def main():
 
         # load/read csv files
         with st.spinner('Wait for it...'):
-            raw_data = load_data(all_files)
+            if not parallel_computing:
+                raw_data = load_data(all_files)
+            else:
+                with parallel_backend('multiprocessing', n_jobs=-2):
+                    results = Parallel()(delayed(par_load_data)(f)
+                                         for f in all_files)
+                # join data
+                for key, df in results:
+                    raw_data[key] = df
+                # sort data
+                raw_data = dict(sorted(raw_data.items()))
         placeholder.empty()
     else:
         # load cached raw_data (deserialize)
-        with open(cache_file, 'rb') as handle:
-            raw_data = pickle.load(handle)
-            avg_data = pickle.load(handle)
-            stderr_data = pickle.load(handle)
+        try:
+            with open(cache_file, 'rb') as handle:
+                raw_data = pickle.load(handle)
+                avg_data = pickle.load(handle)
+                stderr_data = pickle.load(handle)
+        except:
+            st.error(
+                ":x: Corrupted cached data! Please refresh (F5) this page.")
+            os.remove(cache_file)
+            stop()
 
     # check missing lines then missing csv files
     check_missing_lines(raw_data, num_csv_files,
@@ -1012,25 +1078,27 @@ def main():
     check_missing_files(raw_data)
 
     if compute_best_cte:
-        start = timer()
         with st.spinner('Computing best CTE value...'):
-            # best_cte = cte_optimization(
-            #    dict(itertools.islice(raw_data.items(), 944, 1504)))
             arg = dict(itertools.islice(raw_data.items(), 1060, 1501))
-            results = Parallel(n_jobs=12)(delayed(cte_optimization)(x, arg)
-                                          for x in 1.e-6*np.arange(14.0, 44.0, 0.03125))
+            results = Parallel(n_jobs=-2)(delayed(cte_optimization)(x, arg)
+                                          for x in 1.e-6*np.arange(14.0, 45.0, 0.03125))
             best_cte = min(results, key=lambda t: t[1])[0]
-            end = timer()
         st.subheader(f"best_cte = {best_cte}")
-        st.caption(f"Time: {end-start}s")
 
     # cte changed value, recompute
     if st.session_state.cte_changed or cache_miss:
         t0 = timer()
         with st.spinner('Wait, computing average, error and corrected values...'):
             # thermal expansion correction
-            temperature_c = thermal_correction(raw_data)
-            avg_data['temperature_c'] = temperature_c
+            if not parallel_computing:
+                avg_data['temperature_c'] = thermal_correction(raw_data)
+            else:
+                with parallel_backend('multiprocessing', n_jobs=-2):
+                    results = Parallel()(delayed(par_thermal_correction)(
+                        key, df) for key, df in raw_data.items())
+                for key, df, tc in results:
+                    raw_data[key] = pd.concat([raw_data[key], df], axis=1)
+                    avg_data.loc[key, 'temperature_c'] = tc
 
             # compute std dev and average data
             avg_data = myavg(raw_data)
@@ -1067,7 +1135,7 @@ def main():
     fftpts = sidebar.slider('How many points to use in FFT?',
                             2*mpts,
                             len(avg_data[gravity]),
-                            value=(mpts)*((len(avg_data[gravity]))//(mpts)),
+                            value=len(avg_data[gravity]),
                             step=mpts,
                             key="fftpts")
 
@@ -1145,6 +1213,9 @@ if __name__ == '__main__':
 
     # compute best cte only once and use the result
     compute_best_cte = False
+
+    # enable parallel processing
+    parallel_computing = True
 
     # page title/header
     title = "WPA Tides Experiment - Realtime Data Visualization"
