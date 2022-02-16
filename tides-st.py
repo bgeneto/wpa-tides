@@ -28,8 +28,8 @@ History:  v1.0.0 Initial release
                  Write all objects in one pickle file with pkl extension
           v1.2.6 Secondary pendulum selected by default
                  Added procedure to remove csv lines with spurious data (outliers)
-          v1.2.7 Start DFT plot from 0 to 4 instead of 0.3 to 4. 
-                 Change CTE slider to radio. Added function to find optimum cte value                  
+          v1.2.7 Start DFT plot from 0 to 4 instead of 0.3 to 4.
+                 Change CTE slider to radio. Added function to find optimum cte value
           v1.2.8 Added interpolated fft plots
           v1.2.9 Select max number of points for fft plots
 
@@ -195,13 +195,14 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame],
        with spurious data.
     '''
     # discard if moving average greater than period threshold
-    threshold = 0.005
+    threshold = 0.002
 
     # min number of lines in csv files to be considered as valid
     min_lines_csv = 10 if csv.lines/2 > 10 else csv.lines/2
+    wstr = ''
     for key, df in raw_data.items():
         nlines = len(df)
-        sr = df['period'].rolling(3).median()
+        sr = df['period'].rolling(2).median()
         difference = np.abs(df['period'] - sr)
         outlier_idx = difference > threshold
         num_outliers = len(df['period'][outlier_idx])
@@ -209,8 +210,7 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame],
             # remove outliers and reset index
             raw_data[key].drop(df[outlier_idx].index, inplace=True)
             raw_data[key].reset_index(drop=True, inplace=True)
-            st.warning(
-                f":warning: Removing {num_outliers} outlier(s) line(s) in file {key}.csv")
+            wstr += f":warning: Removing {num_outliers} outlier(s) line(s) in file {key}.csv  \n"
         if nlines < min_lines_csv:
             st.warning(
                 f":warning: Ignoring file {key}. Wrong number of lines.")
@@ -228,6 +228,9 @@ def check_missing_lines(raw_data: dict[str, pd.DataFrame],
         st.error(
             ":x: Not all csv files were read successfully. Please refresh (F5) this page!")
         stop()
+
+    if wstr:
+        st.warning(wstr)
 
 
 def par_load_data(f):
@@ -291,7 +294,8 @@ def check_missing_files(raw_data: dict[str, pd.DataFrame]) -> None:
         # update date
         d1 = d2
 
-    st.warning(wstr)
+    if wstr:
+        st.warning(wstr)
 
 
 def cte_optimization(cte: float, raw_data: dict[str, pd.DataFrame]) -> int:
@@ -1090,15 +1094,17 @@ def main():
         t0 = timer()
         with st.spinner('Wait, computing average, error and corrected values...'):
             # thermal expansion correction
+            avg_data = pd.DataFrame(index=raw_data[list(raw_data)[-1]].index)
             if not parallel_computing:
                 avg_data['temperature_c'] = thermal_correction(raw_data)
             else:
                 with parallel_backend('multiprocessing', n_jobs=-2):
                     results = Parallel()(delayed(par_thermal_correction)(
                         key, df) for key, df in raw_data.items())
-                for key, df, tc in results:
-                    raw_data[key] = pd.concat([raw_data[key], df], axis=1)
-                    avg_data.loc[key, 'temperature_c'] = tc
+                if cache_miss:
+                    for key, df, tc in results:
+                        raw_data[key] = pd.concat([raw_data[key], df], axis=1)
+                        avg_data.loc[key, 'temperature_c'] = tc
 
             # compute std dev and average data
             avg_data = myavg(raw_data)
