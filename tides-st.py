@@ -34,7 +34,8 @@ History:  v1.0.0  Initial release
           v1.2.9  Select max number of points for fft plots
           v1.3.9  Extract csv files in memory and load them in memory
                   Compute avg and std err in parallel
-          v1.3.10 Cache expires in 60 min.
+          v1.3.11 Cache expires in 60 min. Removed on_change from first radio.
+                  Note: this can cause a cte cache missmatch.
 
 Usage:
     $ streamlit run tides-st.py
@@ -602,7 +603,7 @@ def initial_sidebar_config():
         ('UnB Secondary', 'UnB Primary'),
         index=0,
         key="pendulum",
-        on_change=cte_status
+        # on_change=cte_status
     )
     # date selector
     sidebar.date_input("Choose a day to plot:", key="plot_date")
@@ -1101,11 +1102,10 @@ def main():
                 with parallel_backend('multiprocessing', n_jobs=nthreads):
                     results = Parallel()(delayed(par_thermal_correction)(
                         key, df) for key, df in raw_data.items())
-                if cache_miss:
-                    for key, df, tc in results:
-                        raw_data[key] = pd.concat([raw_data[key], df], axis=1)
-                        avg_data.loc[key, 'temperature_c'] = tc
-
+                # update raw and avg values based on CTE
+                for key, df, tc in results:
+                    raw_data[key][df.columns] = df
+                    avg_data.loc[key, 'temperature_c'] = tc
             # compute std dev and average data
             if not parallel_computing:
                 avg_data = myavg(raw_data)
@@ -1114,11 +1114,10 @@ def main():
                 with parallel_backend('multiprocessing', n_jobs=nthreads):
                     results = Parallel()(delayed(par_myavg_err)(
                         key, df) for key, df in raw_data.items())
-
+                # results returns both avg and err data in a tuple
                 avg_data = pd.DataFrame([sr[0] for sr in results]).sort_index()
                 stderr_data = pd.DataFrame(
                     [sr[1] for sr in results]).sort_index()
-
             tf = timer()
             st.caption(f"Computation time: {tf-t0:.2f}")
 
