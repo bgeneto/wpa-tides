@@ -7,33 +7,35 @@ by the tides.py (unattended) script in order to calculate the average
 pendulum period, corrected gravitational acceleration etc.
 
 Author:   b g e n e t o @ g m a i l . c o m
-History:  v1.0.0 Initial release
-          v1.0.1 Added pendulum selection
-          v1.0.2 Added export button for average csv file
-          v1.0.3 Remove append function with concat+transpose
-          v1.0.4 Added slider for changing CTE
-          v1.0.5 Added script version in bottom of the page
-          v1.0.6 Added num plots slider and copyright notice
-          v1.0.7 Use 'data' directory to save and download files
-          v1.0.8 Download files from password protected folder
-          v1.1.0 Save raw_data to pickle file to improve performance
-          v1.1.1 Correct counting number of csv files
-          v1.1.2 Added trendline to specific plots
-          v1.1.3 Using real fft version from scipy
-          v1.1.4 Added slider for points in FFT
-          v1.1.5 Added more historical plots
-          v1.2.5 Deleted low noise removal procedure
-                 Added error bars and std error computation
-                 Using os.replace to implement atomic file write
-                 Write all objects in one pickle file with pkl extension
-          v1.2.6 Secondary pendulum selected by default
-                 Added procedure to remove csv lines with spurious data (outliers)
-          v1.2.7 Start DFT plot from 0 to 4 instead of 0.3 to 4.
-                 Change CTE slider to radio. Added function to find optimum cte value
-          v1.2.8 Added interpolated fft plots
-          v1.2.9 Select max number of points for fft plots
-          v1.3.9 Extract csv files in memory and load them in memory
-                 Compute avg and std err in parallel
+History:  v1.0.0  Initial release
+          v1.0.1  Added pendulum selection
+          v1.0.2  Added export button for average csv file
+          v1.0.3  Remove append function with concat+transpose
+          v1.0.4  Added slider for changing CTE
+          v1.0.5  Added script version in bottom of the page
+          v1.0.6  Added num plots slider and copyright notice
+          v1.0.7  Use 'data' directory to save and download files
+          v1.0.8  Download files from password protected folder
+          v1.1.0  Save raw_data to pickle file to improve performance
+          v1.1.1  Correct counting number of csv files
+          v1.1.2  Added trendline to specific plots
+          v1.1.3  Using real fft version from scipy
+          v1.1.4  Added slider for points in FFT
+          v1.1.5  Added more historical plots
+          v1.2.5  Deleted low noise removal procedure
+                  Added error bars and std error computation
+                  Using os.replace to implement atomic file write
+                  Write all objects in one pickle file with pkl extension
+          v1.2.6  Secondary pendulum selected by default
+                  Added procedure to remove csv lines with spurious data (outliers)
+          v1.2.7  Start DFT plot from 0 to 4 instead of 0.3 to 4.
+                  Change CTE slider to radio. Added function to find optimum cte value
+          v1.2.8  Added interpolated fft plots
+          v1.2.9  Select max number of points for fft plots
+          v1.3.9  Extract csv files in memory and load them in memory
+                  Compute avg and std err in parallel
+          v1.3.10 Cache expires in 60 min. removed on_change from first
+                  radio (pendulum selection)
 
 Usage:
     $ streamlit run tides-st.py
@@ -67,9 +69,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.3.9"
+__version__ = "1.3.10"
 __status__ = "Development"
-__date__ = "20220216"
+__date__ = "20220217"
 
 
 def stop(code=0):
@@ -573,9 +575,8 @@ def archive_too_old(fn: str, output_dir: str) -> bool:
     if not os.path.isfile(fpath):
         return True
     import time
-
-    # 20 minutes old to (downloaded archive) be considered old
-    min_delta = 20*60
+    # 60 minutes old to (downloaded archive) be considered old
+    min_delta = 60*60
     # get file modification time
     ftime = os.path.getmtime(fpath)
     # current time
@@ -602,7 +603,8 @@ def initial_sidebar_config():
         ('UnB Secondary', 'UnB Primary'),
         index=0,
         key="pendulum",
-        on_change=cte_status)
+        # on_change=cte_status
+    )
     # date selector
     sidebar.date_input("Choose a day to plot:", key="plot_date")
     # default session values
