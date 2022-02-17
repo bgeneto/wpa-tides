@@ -34,8 +34,7 @@ History:  v1.0.0  Initial release
           v1.2.9  Select max number of points for fft plots
           v1.3.9  Extract csv files in memory and load them in memory
                   Compute avg and std err in parallel
-          v1.3.10 Cache expires in 60 min. removed on_change from first
-                  radio (pendulum selection)
+          v1.3.10 Cache expires in 60 min.
 
 Usage:
     $ streamlit run tides-st.py
@@ -603,7 +602,7 @@ def initial_sidebar_config():
         ('UnB Secondary', 'UnB Primary'),
         index=0,
         key="pendulum",
-        # on_change=cte_status
+        on_change=cte_status
     )
     # date selector
     sidebar.date_input("Choose a day to plot:", key="plot_date")
