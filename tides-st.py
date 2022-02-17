@@ -36,6 +36,7 @@ History:  v1.0.0  Initial release
                   Compute avg and std err in parallel
           v1.3.11 Cache expires in 60 min. Removed on_change from first radio.
                   Note: this can cause a cte cache missmatch.
+          v1.3.12 Correct average in fft plot
 
 Usage:
     $ streamlit run tides-st.py
@@ -479,7 +480,7 @@ def st_layout(title: str = "Streamlit App") -> None:
 
 def download_archive(fn: str, output_dir: str) -> bool:
     """Download file from Nextcloud"""
-    display.wait("Downloading pendulum data archive...")
+    display.wait("Downloading pendulum data archive")
     import requests
     fpath = os.path.join(output_dir, fn)
     share_id = 'kbiz4qzDdkFAygb'
@@ -508,7 +509,7 @@ def download_archive(fn: str, output_dir: str) -> bool:
 
 def extract_to_memory_and_load_data(fn: str, output_dir: str) -> dict:
     """Extract all files to memory and use pandas read_csv to load data in memory"""
-    display.wait("Extracting archive and loading csv data...")
+    display.wait("Extracting archive and loading csv data")
     import tarfile
     fpath = os.path.join(output_dir, fn)
     raw_data = {}
@@ -530,7 +531,7 @@ def extract_to_memory_and_load_data(fn: str, output_dir: str) -> dict:
 
 def extract_archive(fn: str, output_dir: str) -> bool:
     """Extracts all files in a tgz file to disk"""
-    display.wait("Extracting archive data...")
+    display.wait("Extracting archive data")
     import tarfile
     fpath = os.path.join(output_dir, fn)
     destination_dir = os.path.join(output_dir, filename_only(fn))
@@ -843,12 +844,12 @@ def daily_plots(options, plot_date, avg_data, stderr_data):
 
 def interpolated_fft_plots(signal, npts: int = 0):
     from scipy.fft import rfft, rfftfreq
-    from scipy.signal import find_peaks
 
-    col = signal.name
-    avg = signal.mean()
-    s = (signal-avg)
-    s = s[0:npts]
+    s = signal if not npts else signal[0:npts]
+    col = s.name
+    avg = s.mean()
+    s = signal - avg
+
     mult = 2
     idx = range(0, mult*len(s.index))
     sr = pd.Series(index=idx, name=col)
@@ -1083,7 +1084,7 @@ def main():
             stop()
 
     if compute_best_cte:
-        with st.spinner('Computing best CTE value...'):
+        with st.spinner('Computing best CTE value'):
             arg = dict(itertools.islice(raw_data.items(), 1060, 1501))
             results = Parallel(n_jobs=nthreads)(delayed(cte_optimization)(x, arg)
                                                 for x in 1.e-6*np.arange(14.0, 45.0, 0.03125))
@@ -1093,7 +1094,7 @@ def main():
     # cte changed value, recompute
     if st.session_state.cte_changed or cache_miss:
         t0 = timer()
-        with st.spinner('Wait, computing average, error and corrected values...'):
+        with st.spinner('Wait, computing average, error and corrected values'):
             # thermal expansion correction
             avg_data = pd.DataFrame(index=raw_data[list(raw_data)[-1]].index)
             if not parallel_computing:
