@@ -300,7 +300,7 @@ def load_uniandes_data(csv_file: str, dir: str) -> dict:
             0:-3].replace(':', 'h')
         raw_data[strtime] = ndf.drop('datetime', axis='columns')
         if int(ndf['sample'].max()) != 64:
-            display.warning(f'Wrong number of samples in run dated {dtfmt}')
+            display.warning(f'Wrong number of samples in run dated {strtime}')
 
     # sort by date/filename
     ret = dict(sorted(raw_data.items()))
