@@ -37,6 +37,7 @@ History:  v1.0.0  Initial release
           v1.3.11 Cache expires in 60 min. Removed on_change from first radio.
                   Note: this can cause a cte cache missmatch.
           v1.3.12 Correct average in fft plot
+          v1.4.0  Added uniandes data support
 
 Usage:
     $ streamlit run tides-st.py
@@ -70,9 +71,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.3.10"
+__version__ = "1.4.0"
 __status__ = "Development"
-__date__ = "20220217"
+__date__ = "20220224"
 
 
 def stop(code=0):
@@ -270,6 +271,36 @@ def load_data(all_files: list) -> dict:
                                            header=None, float_precision='round_trip')
         except:
             st.error(f":x: Error reading csv file named {f.stem}")
+
+    # sort by date/filename
+    ret = dict(sorted(raw_data.items()))
+
+    return ret
+
+
+def load_uniandes_data(csv_file: str, dir: str) -> dict:
+    fp = os.path.join(dir, csv_file)
+    if not os.path.isfile(fp):
+        display.fatal(f"Uniandes data file ({fp}) not found")
+        stop()
+    try:
+        df = pd.read_csv(fp, usecols=['sample', 'datetime (utc)', 'period (s)', 'gravity (m/s2)', 'velocity (m/s)', 'temperature (c)'],
+                         float_precision='round_trip')
+    except Exception as e:
+        display.fatal(f"Error reading csv file named {fp}")
+        stop()
+
+    df.rename(columns={'sample': 'sample', 'datetime (utc)': 'datetime', 'period (s)': 'period',
+              'gravity (m/s2)': 'gravity_pic', 'velocity (m/s)': 'velocity', 'temperature (c)': 'temperature'},
+              inplace=True)
+    df_lst = np.array_split(df, len(df[df['sample'] == exp.osc]))
+    raw_data = {}
+    for ndf in df_lst:
+        strtime = ndf.iloc[0, 1].split('.')[0].replace(' ', 'T')[
+            0:-3].replace(':', 'h')
+        raw_data[strtime] = ndf.drop('datetime', axis='columns')
+        if int(ndf['sample'].max()) != 64:
+            display.warning(f'Wrong number of samples in run dated {dtfmt}')
 
     # sort by date/filename
     ret = dict(sorted(raw_data.items()))
@@ -601,7 +632,7 @@ def initial_sidebar_config():
     # pendulum radio box
     sidebar.radio(
         "Please choose a pendulum:",
-        ('UnB Secondary', 'UnB Primary'),
+        ('UnB Secondary', 'UnB Primary', 'Uniandes'),
         index=0,
         key="pendulum",
         # on_change=cte_status
@@ -741,6 +772,10 @@ def historical_plots(options, avg_data):
 
 def individual_plots(options, plot_date, nlast, raw_data):
     nraw_data = {k: v for k, v in raw_data.items() if k.startswith(plot_date)}
+    if len(nraw_data) < 1:
+        st.warning(":warning: No data available in the selected date! Please choose another date")
+        return
+
     for col in options:
         tl = None
         mode = 'markers+lines'
@@ -761,12 +796,12 @@ def individual_plots(options, plot_date, nlast, raw_data):
                 error_y = None if col in [
                     'temperature', 'velocity'] else [err]*lsr
                 fig = px.scatter(sr,
-                                 y=sr.values,
-                                 x=sr.index,
-                                 title=f"{col.upper()} @ {key} [{lsr} pts | avg: {avg:.7f} | err: {err:.3e}]",
-                                 labels={"index": "oscillation", "y": sr.name},
-                                 trendline=tl,
-                                 error_y=error_y)
+                                y=sr.values,
+                                x=sr.index,
+                                title=f"{col.upper()} @ {key} [{lsr} pts | avg: {avg:.7f} | err: {err:.3e}]",
+                                labels={"index": "oscillation", "y": sr.name},
+                                trendline=tl,
+                                error_y=error_y)
                 fig.data[0].update(mode=mode)
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -790,7 +825,7 @@ def daily_plots_old(options, plot_date, avg_data, stderr_data):
             fig.update_traces(mode='markers+lines')
             st.plotly_chart(fig, use_container_width=True)
         else:
-            display.warning("No data available in the selected day!")
+            st.warning(":warning: No data available in the selected date! Please choose another date")
 
 
 def daily_plots(options, plot_date, avg_data, stderr_data):
@@ -839,7 +874,7 @@ def daily_plots(options, plot_date, avg_data, stderr_data):
                 hovermode="x")
             st.plotly_chart(fig, use_container_width=True)
         else:
-            display.warning("No data available in the selected day!")
+            st.warning(":warning: No data available in the selected date! Please choose another date")
 
 
 def interpolated_fft_plots(signal, npts: int = 0):
@@ -856,7 +891,7 @@ def interpolated_fft_plots(signal, npts: int = 0):
     sr.iloc[::2] = s.iloc[::1]
     sr = sr.interpolate(method='spline', order=3)
     idx = range(0, mult*len(sr.index))
-    nsr = pd.Series(index=idx, name=col)
+    nsr = pd.Series(index=idx, name=col, dtype='float64')
     nsr.iloc[::2] = sr.iloc[::1]
     nsr = nsr.interpolate(method='spline', order=3)
     nsr = nsr.to_numpy()
@@ -1021,6 +1056,11 @@ def main():
         pdl.length = 2.62135
         pdl.temperature = 22.6260
         archive = 'tides-data-wpafup.tgz'
+    elif p == 'Uniandes':
+        pdl.length = 2.815499822
+        pdl.temperature = 0.0
+        exp.dt = 12
+        archive = 'resultados_uniandes.csv'
 
     if not archive:
         display.fatal("Invalid pendulum selection!")
@@ -1055,16 +1095,20 @@ def main():
     cache_miss = archive_too_old(
         archive, output_dir) or no_cache_file
     if cache_miss:
-        # download compressed archive
-        if not download_archive(archive, output_dir):
-            display.fatal(
-                "Cannot download compressed archive from remote location!")
-            st.warning("Try again by reloading this page (F5).")
-            stop()
+        if not p == 'Uniandes':
+            # download compressed archive
+            if not download_archive(archive, output_dir):
+                display.fatal(
+                    "Cannot download compressed archive from remote location!")
+                st.warning("Try again by reloading this page (F5).")
+                stop()
 
-        # new: extract to memory and load data in one pass
-        raw_data = extract_to_memory_and_load_data(archive, output_dir)
-        # check missing lines then missing csv files
+            # new: extract to memory and load data in one pass
+            raw_data = extract_to_memory_and_load_data(archive, output_dir)
+            # check missing lines then missing csv files
+        else:
+            raw_data = load_uniandes_data(archive, output_dir)
+
         check_missing_lines(raw_data, len(raw_data),
                             os.path.join(output_dir, archive))
         check_missing_files(raw_data)
