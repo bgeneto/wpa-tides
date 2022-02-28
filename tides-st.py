@@ -773,7 +773,8 @@ def historical_plots(options, avg_data):
 def individual_plots(options, plot_date, nlast, raw_data):
     nraw_data = {k: v for k, v in raw_data.items() if k.startswith(plot_date)}
     if len(nraw_data) < 1:
-        st.warning(":warning: No data available in the selected date! Please choose another date")
+        st.warning(
+            ":warning: No data available in the selected date! Please choose another date")
         return
 
     for col in options:
@@ -796,12 +797,12 @@ def individual_plots(options, plot_date, nlast, raw_data):
                 error_y = None if col in [
                     'temperature', 'velocity'] else [err]*lsr
                 fig = px.scatter(sr,
-                                y=sr.values,
-                                x=sr.index,
-                                title=f"{col.upper()} @ {key} [{lsr} pts | avg: {avg:.7f} | err: {err:.3e}]",
-                                labels={"index": "oscillation", "y": sr.name},
-                                trendline=tl,
-                                error_y=error_y)
+                                 y=sr.values,
+                                 x=sr.index,
+                                 title=f"{col.upper()} @ {key} [{lsr} pts | avg: {avg:.7f} | err: {err:.3e}]",
+                                 labels={"index": "oscillation", "y": sr.name},
+                                 trendline=tl,
+                                 error_y=error_y)
                 fig.data[0].update(mode=mode)
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -825,7 +826,8 @@ def daily_plots_old(options, plot_date, avg_data, stderr_data):
             fig.update_traces(mode='markers+lines')
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning(":warning: No data available in the selected date! Please choose another date")
+            st.warning(
+                ":warning: No data available in the selected date! Please choose another date")
 
 
 def daily_plots(options, plot_date, avg_data, stderr_data):
@@ -874,7 +876,8 @@ def daily_plots(options, plot_date, avg_data, stderr_data):
                 hovermode="x")
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.warning(":warning: No data available in the selected date! Please choose another date")
+            st.warning(
+                ":warning: No data available in the selected date! Please choose another date")
 
 
 def interpolated_fft_plots(signal, npts: int = 0):
@@ -1193,9 +1196,9 @@ def main():
         default=default_options)
 
     # add fft points to sidebar
-    mpts = 128
+    mpts = 1
     fftpts = sidebar.slider('How many points to use in FFT?',
-                            2*mpts,
+                            1000*mpts,
                             len(avg_data[gravity]),
                             value=len(avg_data[gravity]),
                             step=mpts,
