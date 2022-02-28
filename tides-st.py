@@ -1198,8 +1198,8 @@ def main():
     # add fft points to sidebar
     mpts = 1
     fftpts = sidebar.slider('How many points to use in FFT?',
-                            1849*mpts,
-                            len(avg_data[gravity]),
+                            1000*mpts,
+                            1849, #len(avg_data[gravity]),
                             value=len(avg_data[gravity]),
                             step=mpts,
                             key="fftpts")
