@@ -38,6 +38,8 @@ History:  v1.0.0  Initial release
                   Note: this can cause a cte cache missmatch.
           v1.3.12 Correct average in fft plot
           v1.4.0  Added uniandes data support
+          v1.4.1  Added period correction in fucntion of velocity drift and
+                  gravity_c3 correction in function of period_c3
 
 Usage:
     $ streamlit run tides-st.py
@@ -71,9 +73,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 __status__ = "Development"
-__date__ = "20220224"
+__date__ = "20220304"
 
 
 def stop(code=0):
@@ -351,6 +353,22 @@ def cte_optimization(cte: float, raw_data: dict[str, pd.DataFrame]) -> int:
     return (cte, variance)
 
 
+def period_correction(vel, per):
+    '''correct period in function of velocity drift'''
+    deltav = (vel.diff()/vel).fillna(0)
+    ini = 2**-4
+    num = 2**7
+    best_std = 1e7
+    best_a = 0
+    for a in np.linspace(0, ini, num=num):
+        std = (per*(1 - a*deltav)).std()
+        if std < best_std:
+            best_std = std
+            best_a = a
+    ret = per*(1 - best_a*deltav)[1:] if best_std < per.std() else per
+    return ret
+
+
 def par_thermal_correction(key: str, df: pd.DataFrame) -> tuple[str, pd.DataFrame]:
     ret = pd.DataFrame(index=df.index)
     if pdl.temperature == 0.0:
@@ -362,15 +380,21 @@ def par_thermal_correction(key: str, df: pd.DataFrame) -> tuple[str, pd.DataFram
         temperature_c = df['temperature'].mean()
         ret['length_c'] = pdl.length * \
             (1 + pdl.cte*(df['temperature'] - pdl.temperature))
+    # corrected period
+    ret['period_c'] = period_correction(df['velocity'], df['period'])
     # uncorredted gravity
     ret['gravity'] = 4*math.pi**2*pdl.length/df['period']**2
-    # correction by length expansion/contraction
-    ret['gravity_c2'] = 4 * \
-        math.pi**2*ret['length_c']/df['period']**2
+    # corrected gravity
     ret['gravity_c'] = 4 * \
         math.pi**2*pdl.length * \
         (1 + pdl.cte*(temperature_c -
                       df['temperature']))/df['period']**2
+    # correction by length expansion/contraction
+    ret['gravity_c2'] = 4 * \
+        math.pi**2*ret['length_c']/df['period']**2
+    # correction by length and velocity drift
+    ret['gravity_c3'] = 4 * \
+        math.pi**2*ret['length_c']/ret['period_c']**2
 
     return key, ret, temperature_c
 
@@ -387,15 +411,22 @@ def thermal_correction(raw_data: dict[str, pd.DataFrame]) -> pd.Series:
             temperature_c[key] = df['temperature'].mean()
             raw_data[key]['length_c'] = pdl.length * \
                 (1 + pdl.cte*(df['temperature'] - pdl.temperature))
+        # corrected period
+        raw_data[key]['period_c'] = period_correction(
+            df['velocity'], df['period'])
         # uncorredted gravity
         raw_data[key]['gravity'] = 4*math.pi**2*pdl.length/df['period']**2
-        # correction by length expansion/contraction
-        raw_data[key]['gravity_c2'] = 4 * \
-            math.pi**2*df['length_c']/df['period']**2
+        # corrected gravity
         raw_data[key]['gravity_c'] = 4 * \
             math.pi**2*pdl.length * \
             (1 + pdl.cte*(temperature_c[key] -
                           df['temperature']))/df['period']**2
+        # correction by length expansion/contraction
+        raw_data[key]['gravity_c2'] = 4 * \
+            math.pi**2*df['length_c']/df['period']**2
+        # correction by length and velocity drift
+        raw_data[key]['gravity_c3'] = 4 * \
+            math.pi**2*df['length_c']/raw_data[key]['period_c']**2
 
     return temperature_c
 
@@ -890,7 +921,7 @@ def interpolated_fft_plots(signal, npts: int = 0):
 
     mult = 2
     idx = range(0, mult*len(s.index))
-    sr = pd.Series(index=idx, name=col)
+    sr = pd.Series(index=idx, name=col, dtype='float64')
     sr.iloc[::2] = s.iloc[::1]
     sr = sr.interpolate(method='spline', order=3)
     idx = range(0, mult*len(sr.index))
@@ -1187,7 +1218,9 @@ def main():
 
     # choose proper gravity correction based on available initial temperature
     gravity = 'gravity_c' if pdl.temperature == 0 else 'gravity_c2'
-    default_options = ['period', gravity, 'temperature', 'velocity']
+    default_options = ['period', 'period_c',
+                       gravity, 'gravity_c3',
+                       'temperature', 'velocity']
 
     # add data selection to sidebar
     options = sidebar.multiselect(
@@ -1196,10 +1229,10 @@ def main():
         default=default_options)
 
     # add fft points to sidebar
-    mpts = 1
+    mpts = 128
     fftpts = sidebar.slider('How many points to use in FFT?',
-                            1000*mpts,
-                            1849, #len(avg_data[gravity]),
+                            2*mpts,
+                            len(avg_data[gravity]),
                             value=len(avg_data[gravity]),
                             step=mpts,
                             key="fftpts")
@@ -1258,6 +1291,8 @@ def main():
 
     # fft plot in fftpts from slider
     fft_plots(avg_data[gravity], fftpts)
+
+    fft_plots(avg_data['gravity_c3'], fftpts)
 
     interpolated_fft_plots(avg_data[gravity], fftpts)
 
