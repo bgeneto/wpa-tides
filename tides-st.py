@@ -1290,13 +1290,11 @@ def main():
         daily_plots(options, plot_date, avg_data, stderr_data)
 
     # fft plot in fftpts from slider
-    fft_plots(avg_data[gravity], fftpts)
-
-    fft_plots(avg_data['gravity_c3'], fftpts)
-
-    interpolated_fft_plots(avg_data[gravity], fftpts)
-
-    # extra_plots(avg_data)
+    with st.expander("..:: FFT PLOTS ::.."):
+        st.subheader("FFT PLOTS")
+        fft_plots(avg_data[gravity], fftpts)
+        fft_plots(avg_data['gravity_c3'], fftpts)
+        interpolated_fft_plots(avg_data[gravity], fftpts)
 
     # copyright, version and running time info
     end = timer()
