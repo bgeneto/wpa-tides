@@ -40,6 +40,7 @@ History:  v1.0.0  Initial release
           v1.4.0  Added uniandes data support
           v1.4.1  Added period correction in fucntion of velocity drift and
                   gravity_c3 correction in function of period_c3
+          v1.4.2  Improved local minimum finder for period_c3 computation
 
 Usage:
     $ streamlit run tides-st.py
@@ -64,7 +65,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from joblib import Parallel, delayed, parallel_backend
 from plotly.subplots import make_subplots
-from scipy import stats
+from scipy import optimize, stats
+from sklearn.linear_model import LinearRegression
 
 import streamlit as st
 
@@ -73,7 +75,7 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.4.1"
+__version__ = "1.4.2"
 __status__ = "Development"
 __date__ = "20220304"
 
@@ -353,18 +355,44 @@ def cte_optimization(cte: float, raw_data: dict[str, pd.DataFrame]) -> int:
     return (cte, variance)
 
 
+def period_correction2(df):
+    '''correct period in function of velocity drift'''
+    model = LinearRegression()
+    x = df['sample'].values.reshape(-1, 1)
+    y = df['velocity']
+    model.fit(x, y)
+    y_pred = pd.Series(model.predict(x))
+    deltav = (y_pred - y)/y
+    ini = 0
+    fim = 0.75*2**-4
+    num = 2**7
+    best_std = 1e9
+    best_a = 0
+    for a in np.linspace(ini, fim, num=num):
+        std = (df['period']*(a*deltav + 1)).std()
+        if std < best_std:
+            best_std = std
+            best_a = a
+
+    ret = df['period']*(best_a*deltav +
+                        1)[1:] if best_std < df['period'].std() else df['period']
+    return ret
+
+
 def period_correction(vel, per):
     '''correct period in function of velocity drift'''
     deltav = (vel.diff()/vel).fillna(0)
-    ini = 2**-4
+    ini = 0
+    fim = 0.8125*2**-4
     num = 2**7
-    best_std = 1e7
+    best_std = 1e9
     best_a = 0
-    for a in np.linspace(0, ini, num=num):
+    for a in np.linspace(ini, fim, num=num):
         std = (per*(1 - a*deltav)).std()
         if std < best_std:
             best_std = std
             best_a = a
+
     ret = per*(1 - best_a*deltav)[1:] if best_std < per.std() else per
     return ret
 
@@ -381,7 +409,9 @@ def par_thermal_correction(key: str, df: pd.DataFrame) -> tuple[str, pd.DataFram
         ret['length_c'] = pdl.length * \
             (1 + pdl.cte*(df['temperature'] - pdl.temperature))
     # corrected period
-    ret['period_c'] = period_correction(df['velocity'], df['period'])
+    if compute_corrected_period:
+        #ret['period_c'] = period_correction(df['velocity'], df['period'])
+        ret['period_c'] = period_correction2(df)
     # uncorredted gravity
     ret['gravity'] = 4*math.pi**2*pdl.length/df['period']**2
     # corrected gravity
@@ -393,8 +423,9 @@ def par_thermal_correction(key: str, df: pd.DataFrame) -> tuple[str, pd.DataFram
     ret['gravity_c2'] = 4 * \
         math.pi**2*ret['length_c']/df['period']**2
     # correction by length and velocity drift
-    ret['gravity_c3'] = 4 * \
-        math.pi**2*ret['length_c']/ret['period_c']**2
+    if compute_corrected_period:
+        ret['gravity_c3'] = 4 * \
+            math.pi**2*ret['length_c']/ret['period_c']**2
 
     return key, ret, temperature_c
 
@@ -412,8 +443,10 @@ def thermal_correction(raw_data: dict[str, pd.DataFrame]) -> pd.Series:
             raw_data[key]['length_c'] = pdl.length * \
                 (1 + pdl.cte*(df['temperature'] - pdl.temperature))
         # corrected period
-        raw_data[key]['period_c'] = period_correction(
-            df['velocity'], df['period'])
+        if compute_corrected_period:
+            # raw_data[key]['period_c'] = period_correction(
+            #    df['velocity'], df['period'])
+            raw_data[key]['period_c'] = period_correction2(df)
         # uncorredted gravity
         raw_data[key]['gravity'] = 4*math.pi**2*pdl.length/df['period']**2
         # corrected gravity
@@ -425,8 +458,9 @@ def thermal_correction(raw_data: dict[str, pd.DataFrame]) -> pd.Series:
         raw_data[key]['gravity_c2'] = 4 * \
             math.pi**2*df['length_c']/df['period']**2
         # correction by length and velocity drift
-        raw_data[key]['gravity_c3'] = 4 * \
-            math.pi**2*df['length_c']/raw_data[key]['period_c']**2
+        if compute_corrected_period:
+            raw_data[key]['gravity_c3'] = 4 * \
+                math.pi**2*df['length_c']/raw_data[key]['period_c']**2
 
     return temperature_c
 
@@ -638,6 +672,7 @@ def archive_too_old(fn: str, output_dir: str) -> bool:
     if not os.path.isfile(fpath):
         return True
     import time
+
     # 60 minutes old to (downloaded archive) be considered old
     min_delta = 60*60
     # get file modification time
@@ -1218,8 +1253,8 @@ def main():
 
     # choose proper gravity correction based on available initial temperature
     gravity = 'gravity_c' if pdl.temperature == 0 else 'gravity_c2'
-    default_options = ['period', 'period_c',
-                       gravity, 'gravity_c3',
+    default_options = ['period',
+                       gravity,
                        'temperature', 'velocity']
 
     # add data selection to sidebar
@@ -1293,7 +1328,8 @@ def main():
     with st.expander("..:: FFT PLOTS ::.."):
         st.subheader("FFT PLOTS")
         fft_plots(avg_data[gravity], fftpts)
-        fft_plots(avg_data['gravity_c3'], fftpts)
+        if compute_corrected_period:
+            fft_plots(avg_data['gravity_c3'], fftpts)
         interpolated_fft_plots(avg_data[gravity], fftpts)
 
     # copyright, version and running time info
@@ -1311,6 +1347,9 @@ if __name__ == '__main__':
 
     # compute best cte only once and use the result
     compute_best_cte = False
+
+    # compute corrected period based on velocity drift (precession)
+    compute_corrected_period = False
 
     # enable parallel processing
     parallel_computing = True
