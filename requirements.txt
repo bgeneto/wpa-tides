@@ -4,5 +4,6 @@ pandas
 plotly
 requests
 scipy
+sklearn
 statsmodels
 streamlit
