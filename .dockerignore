@@ -1,0 +1,25 @@
+# ignore python virtual envs 
+venv
+.venv
+# ignore .git and .cache folders
+.git
+.gitignore
+.cache
+# ignore all *.class files in all folders, including build root
+**/*.class
+# ignore all markdown files (md) beside all README*.md
+*.md
+!README*.md
+# ignore all text files (txt) except requirements.txt and packages.txt
+*.txt
+!requirements.txt
+!packages.txt
+# ignore Dockerfile and docker-compose
+Dockerfile
+Dockerfile.*
+docker-compose.*
+# ignore folders
+logs/
+data/
+utils/
+
