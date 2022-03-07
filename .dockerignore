@@ -2,6 +2,7 @@
 venv
 .venv
 # ignore .git and .cache folders
+**/.git
 .git
 .gitignore
 .cache
