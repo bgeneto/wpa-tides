@@ -10,9 +10,10 @@ RUN pip install --upgrade pip \
 
 
 FROM python:3-slim AS app
-COPY --from=localhost:5000/streamlit/streamlit-base:latest /root/.local /root/.local
-COPY *.py /app/
+#COPY --from=localhost:5000/streamlit/streamlit-base:latest /root/.local /root/.local
+COPY --from=builder /root/.local /root/.local
 WORKDIR app
+COPY . .
 EXPOSE 8501
 ENV PATH=/root/.local/bin:$PATH
 ENTRYPOINT ["streamlit", "run"]

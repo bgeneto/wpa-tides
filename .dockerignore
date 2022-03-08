@@ -1,6 +1,8 @@
 # ignore python virtual envs 
 venv
 .venv
+env
+!.env
 # ignore .git and .cache folders
 .git
 .gitignore
@@ -22,4 +24,3 @@ docker-compose.*
 logs/
 data/
 utils/
-
