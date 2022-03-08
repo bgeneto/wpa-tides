@@ -39,8 +39,9 @@ History:  v1.0.0  Initial release
           v1.3.12 Correct average in fft plot
           v1.4.0  Added uniandes data support
           v1.4.1  Added period correction in fucntion of velocity drift and
-                  gravity_c3 correction in function of period_c3
-          v1.4.2  Improved local minimum finder for period_c3 computation
+                  gravity_c3 correction in function of period_c
+          v1.4.2  Improved local minimum finder for period_c computation
+          v1.4.3  Added IST data
 
 Usage:
     $ streamlit run tides-st.py
@@ -75,9 +76,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.4.2"
+__version__ = "1.4.3"
 __status__ = "Development"
-__date__ = "20220304"
+__date__ = "20220307"
 
 
 def stop(code=0):
@@ -698,7 +699,7 @@ def initial_sidebar_config():
     # pendulum radio box
     sidebar.radio(
         "Please choose a pendulum:",
-        ('UnB Secondary', 'UnB Primary', 'Uniandes'),
+        ('UnB Secondary', 'UnB Primary', 'Uniandes', 'IST'),
         index=0,
         key="pendulum",
         # on_change=cte_status
@@ -1130,6 +1131,12 @@ def main():
         pdl.temperature = 0.0
         exp.dt = 12
         archive = 'resultados_uniandes.csv'
+    elif p == 'IST':
+        pdl.length = 2.5219999
+        pdl.temperature = 0.0
+        exp.dt = 12
+        mycsv.date_format="%Y-%m-%d %H_%M_%S"
+        archive = 'ist-data.tgz'
 
     if not archive:
         display.fatal("Invalid pendulum selection!")
