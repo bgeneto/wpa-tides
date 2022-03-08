@@ -2,6 +2,7 @@ joblib
 numpy
 pandas
 plotly
+python-dotenv
 requests
 scipy
 sklearn

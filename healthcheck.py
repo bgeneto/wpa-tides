@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
+import os
 import requests
 import sys
-  
+from dotenv import load_dotenv  
+load_dotenv()
+
+PORT = os.getenv('PORT')
+
 # Making a HEAD request
 try:
-    r = requests.head('http://localhost:8501/')
+    r = requests.head(f'http://localhost:{PORT}/')
 except:
     sys.exit(1)
   
