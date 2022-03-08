@@ -10,6 +10,7 @@ services:
       - 8501:8501
     volumes:
       - ./data:/app/data
+      - ./tides-st.py:/app/main.py
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
     environment:

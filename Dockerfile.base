@@ -1,4 +1,0 @@
-ARG tag=3-slim
-FROM python:${tag} AS python-base
-COPY packages.txt /
-RUN apt-get update && xargs apt-get install -y </packages.txt && apt-get clean
