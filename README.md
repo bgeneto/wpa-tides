@@ -8,7 +8,7 @@ graphics.
 ## Install procedure
 
 ```shell
-$ git clone -b streamlit https://github.com/bgeneto/wpa-tides.git
+$ git clone -b parallel https://github.com/bgeneto/wpa-tides.git
 $ cd wpa-tides
 $ docker build -t tides-streamlit:latest .
 ```
