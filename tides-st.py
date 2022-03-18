@@ -42,6 +42,8 @@ History:  v1.0.0  Initial release
                   gravity_c3 correction in function of period_c
           v1.4.2  Improved local minimum finder for period_c computation
           v1.4.4  Added IST data
+          v1.5.0  Using select_slider for FFT and Historical plots.
+                  Added download FFT data button
 
 Usage:
     $ streamlit run tides-st.py
@@ -76,9 +78,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.4.4"
+__version__ = "1.5.0"
 __status__ = "Development"
-__date__ = "20220308"
+__date__ = "20220318"
 
 
 def stop(code=0):
@@ -718,12 +720,13 @@ def initial_sidebar_config():
     #               value=14,
     #               key="cte",
     #               on_change=cte_status)
-    sidebar.radio(
-        "Wire CTE value:",
-        ('default', f'optimized'),
-        index=0,
-        key="cte_radio",
-        on_change=cte_status)
+    # CTE radio (instead of slider)
+    # sidebar.radio(
+    #     "Wire CTE value:",
+    #     ('default', f'optimized'),
+    #     index=0,
+    #     key="cte_radio",
+    #     on_change=cte_status)
 
     # number of individual plots slider
     sidebar.slider('How many individual plots?',
@@ -736,9 +739,9 @@ def initial_sidebar_config():
     return sidebar
 
 
-def historical_plots(options, avg_data):
+def historical_plots(options, avg_data, start_pts, end_pts):
     # plot without indexes
-    df = avg_data.reset_index(drop=True)
+    df = avg_data[start_pts:end_pts].reset_index(drop=True)
 
     # period vs temperature
     # create figure with secondary y-axis
@@ -818,17 +821,18 @@ def historical_plots(options, avg_data):
     st.plotly_chart(fig, use_container_width=True)
 
     # plot gravity comparison
-    fig = px.line(df,
-                  y=['gravity', 'gravity_c', 'gravity_c2'],
-                  x=df.index,
-                  title="GRAVITY (averaged - historical)",
-                  labels={"index": "run", "value": "gravity"})
-    # fig.update_traces(mode='markers+lines')
-    st.plotly_chart(fig, use_container_width=True)
+    # fig = px.line(df,
+    #               y=['gravity', 'gravity_c', 'gravity_c2'],
+    #               x=df.index,
+    #               title="GRAVITY (averaged - historical)",
+    #               labels={"index": "run", "value": "gravity"})
+    # # fig.update_traces(mode='markers+lines')
+    # st.plotly_chart(fig, use_container_width=True)
 
     # plot selected data
     for col in options:
-        sr = avg_data[col].reset_index(drop=True)
+        #sr = avg_data[col].reset_index(drop=True)
+        sr = df[col]
         fig = px.scatter(sr,
                          y=sr.values,
                          x=sr.index,
@@ -947,13 +951,13 @@ def daily_plots(options, plot_date, avg_data, stderr_data):
                 ":warning: No data available in the selected date! Please choose another date")
 
 
-def interpolated_fft_plots(signal, npts: int = 0):
+def interpolated_fft_plots(signal, start_pts, end_pts):
     from scipy.fft import rfft, rfftfreq
 
-    s = signal if not npts else signal[0:npts]
-    col = s.name
+    col = signal.name
+    s = signal[start_pts:end_pts]
     avg = s.mean()
-    s = signal - avg
+    s = s - avg
 
     mult = 2
     idx = range(0, mult*len(s.index))
@@ -1016,15 +1020,15 @@ def interpolated_fft_plots(signal, npts: int = 0):
     st.plotly_chart(fig, use_container_width=True)
 
 
-def fft_plots(signal, npts: int = 0):
+def fft_plots(signal, start_pts, end_pts):
     from scipy.fft import rfft, rfftfreq
     from scipy.signal import find_peaks
 
-    npts = len(signal) if npts == 0 else npts
+    #npts = len(signal) if npts == 0 else npts
     col = signal.name
-    avg = signal.mean()
-    s = (signal-avg).to_numpy()
-    s = s[0:npts]
+    s = signal[start_pts:end_pts]
+    avg = s.mean()
+    s = (s - avg).to_numpy()
 
     # using scipy fft: it is faster
     yf = rfft(s)
@@ -1038,7 +1042,7 @@ def fft_plots(signal, npts: int = 0):
     # normalized amplitude/power:
     amp = np.abs(2.0/N*yf)
 
-    # do not remove low frequency noise
+    # do not remove low frequency noise (it's important)
     if False:
         num_hfn = 6
         xf = xf[num_hfn:]
@@ -1082,6 +1086,8 @@ def fft_plots(signal, npts: int = 0):
     #              title=f"DFT Peaks ({npts} points used)")
     # st.plotly_chart(fig, use_container_width=True)
 
+    return {'frequency': xf, 'amplitude': amp}
+
 
 def extra_plots(df):
     # temperature vs corrected gravity
@@ -1113,7 +1119,8 @@ def main():
     sidebar = initial_sidebar_config()
 
     # selected wire cte from widget
-    pdl.cte = 1e-6*st.session_state.cte
+    #pdl.cte = 1e-6*st.session_state.cte
+    pdl.cte = 1e-6*14
 
     # pendulum data according to the location
     archive = None
@@ -1135,7 +1142,7 @@ def main():
         pdl.length = 2.5219999
         pdl.temperature = 0.0
         exp.dt = 12
-        mycsv.date_format="%Y-%m-%d %H_%M_%S"
+        mycsv.date_format = "%Y-%m-%d %H_%M_%S"
         archive = 'ist-data.tgz'
 
     if not archive:
@@ -1262,22 +1269,33 @@ def main():
     gravity = 'gravity_c' if pdl.temperature == 0 else 'gravity_c2'
     default_options = ['period',
                        gravity,
-                       'temperature', 'velocity']
+                       'temperature',
+                       'velocity']
+
+    # fft sidebar parameters
+    opt_step = 125
+    tam = len(avg_data[gravity])
+
+    # fft points to sidebar
+    # fftpts = sidebar.slider('How many points to use in FFT?',
+    #                         2*opt_step,
+    #                         tam,
+    #                         value=tam,
+    #                         step=opt_step,
+    #                         key="fftpts")
+
+    slider_options = np.arange(0, tam, opt_step, dtype=int)
+    slider_options = np.append(slider_options, tam)
+    start_pts, end_pts = sidebar.select_slider(
+        'Points to use in FFT:',
+        options=slider_options,
+        value=(0, tam))
 
     # add data selection to sidebar
-    options = sidebar.multiselect(
+    data_options = sidebar.multiselect(
         label='Which data to plot?',
         options=avg_data.columns,
         default=default_options)
-
-    # add fft points to sidebar
-    mpts = 128
-    fftpts = sidebar.slider('How many points to use in FFT?',
-                            2*mpts,
-                            len(avg_data[gravity]),
-                            value=len(avg_data[gravity]),
-                            step=mpts,
-                            key="fftpts")
 
     st.success(":point_down: Aggregated data available to download below")
     display.print(
@@ -1314,7 +1332,7 @@ def main():
     # historical plots
     with st.expander("..:: HISTORICAL PLOTS ::.."):
         st.subheader("HISTORICAL PLOTS")
-        historical_plots(options, avg_data)
+        historical_plots(data_options, avg_data, start_pts, end_pts)
 
     # individual plots
     with st.expander("..:: INDIVIDUAL PLOTS ::.."):
@@ -1323,21 +1341,32 @@ def main():
                 and the **number of plots** (*n*) in the left menu")
         st.success(":bulb: This will show only *n* last runs from the \
                    selected date choosen on the left menu")
-        individual_plots(options, plot_date, nlast, raw_data)
+        individual_plots(data_options, plot_date, nlast, raw_data)
 
     # daily plots
     with st.expander("..:: DAILY PLOTS ::.."):
         st.subheader("DAILY PLOTS")
         st.info(":point_left: Please select the **desired date** in the left menu")
-        daily_plots(options, plot_date, avg_data, stderr_data)
+        daily_plots(data_options, plot_date, avg_data, stderr_data)
 
     # fft plot in fftpts from slider
     with st.expander("..:: FFT PLOTS ::.."):
         st.subheader("FFT PLOTS")
-        fft_plots(avg_data[gravity], fftpts)
+        st.success(":point_down: FFT data available to download below")
+
+        fftframe = fft_plots(avg_data[gravity], start_pts, end_pts)
         if compute_corrected_period:
-            fft_plots(avg_data['gravity_c3'], fftpts)
-        interpolated_fft_plots(avg_data[gravity], fftpts)
+            fft_plots(avg_data['gravity_c3'], start_pts, end_pts)
+
+        interpolated_fft_plots(avg_data[gravity], start_pts, end_pts)
+
+        st.download_button(
+            "Download FFT data",
+            pd.DataFrame(fftframe).to_csv(index=False).encode('utf-8'),
+            "fftdata.csv",
+            "text/csv",
+            key='download-csv'
+        )
 
     # copyright, version and running time info
     end = timer()
