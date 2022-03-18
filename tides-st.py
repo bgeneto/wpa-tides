@@ -1363,7 +1363,7 @@ def main():
         st.download_button(
             "Download FFT data",
             pd.DataFrame(fftframe).to_csv(index=False).encode('utf-8'),
-            "fftdata.csv",
+            f"fftdata-{p}.csv",
             "text/csv",
             key='download-csv'
         )
