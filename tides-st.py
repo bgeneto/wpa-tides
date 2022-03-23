@@ -1286,13 +1286,19 @@ def main():
 
     #slider_options = np.arange(0, tam, opt_step, dtype=int)
     #slider_options = np.append(slider_options, tam)
-    #start_pts, end_pts = sidebar.select_slider(
+    # start_pts, end_pts = sidebar.select_slider(
     #    'Points to use in FFT:',
     #    options=slider_options,
     #    value=(0, tam))
-    
-    start_pts = sidebar.number_input('Start point')
-    end_pts = sidebar.number_input('End point')
+
+    start_pts = int(sidebar.number_input('Start point',
+                                         min_value=0,
+                                         max_value=tam-opt_step,
+                                         value=0))
+    end_pts = int(sidebar.number_input('End point',
+                                       min_value=opt_step,
+                                       max_value=tam,
+                                       value=tam))
 
     # add data selection to sidebar
     data_options = sidebar.multiselect(
