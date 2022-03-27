@@ -45,6 +45,7 @@ History:  v1.0.0  Initial release
           v1.5.0  Using select_slider for FFT and Historical plots.
                   Added download FFT data button
           v1.5.1  Using input box instead of slider for FFT points
+          v1.5.2  Added one more FFT plot
 
 Usage:
     $ streamlit run tides-st.py
@@ -79,7 +80,7 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.5.1"
+__version__ = "1.5.2"
 __status__ = "Development"
 __date__ = "20220327"
 
@@ -1070,6 +1071,14 @@ def fft_plots(signal, start_pts, end_pts):
                  y=amp[xmask],
                  labels={"x": "frequency (1/day)", "y": "amplitude"},
                  title=f"(0.0-4) DFT of {col.upper()} ({N} points used)")
+    # fig.update_xaxes(range=[0.0, 4])
+    st.plotly_chart(fig, use_container_width=True)
+
+    xmask = np.where((xf >= 1.0) & (xf < 6.03))
+    fig = px.bar(x=xf[xmask],
+                 y=amp[xmask],
+                 labels={"x": "frequency (1/day)", "y": "amplitude"},
+                 title=f"(1-6) DFT of {col.upper()} ({N} points used)")
     # fig.update_xaxes(range=[0.0, 4])
     st.plotly_chart(fig, use_container_width=True)
 
