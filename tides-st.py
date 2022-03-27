@@ -44,6 +44,7 @@ History:  v1.0.0  Initial release
           v1.4.4  Added IST data
           v1.5.0  Using select_slider for FFT and Historical plots.
                   Added download FFT data button
+          v1.5.1  Using input box instead of slider for FFT points
 
 Usage:
     $ streamlit run tides-st.py
@@ -78,9 +79,9 @@ __maintainer__ = "Bernhard Enders"
 __email__ = "b g e n e t o @ g m a i l d o t c o m"
 __copyright__ = "Copyright 2022, Bernhard Enders"
 __license__ = "GPL"
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 __status__ = "Development"
-__date__ = "20220318"
+__date__ = "20220327"
 
 
 def stop(code=0):
