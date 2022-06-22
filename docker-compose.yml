@@ -2,19 +2,19 @@ version: "3.9"
 services:
   app:
     build: .
-    image: tides-streamlit:latest
-    container_name: tides-streamlit
-    hostname: tides
+    image: ${HOST}-streamlit:latest
+    container_name: ${HOST}-streamlit
+    hostname: ${HOST}
     restart: always
     ports:
-      - 8501:${PORT}
+      - ${PORT}:8501
     volumes:
       - ./data:/app/data
       - ./tides-st.py:/app/main.py
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
     environment:
-      - TZ=America/Sao_Paulo
+      - TZ=${TZ}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     labels:
