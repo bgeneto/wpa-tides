@@ -3,9 +3,10 @@ import os
 import requests
 import sys
 from dotenv import load_dotenv  
-load_dotenv()
 
-PORT = os.getenv('PORT')
+#load_dotenv()
+#PORT = os.getenv('PORT')
+PORT=8501
 
 # Making a HEAD request
 try:
